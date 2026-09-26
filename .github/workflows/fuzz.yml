@@ -1,0 +1,50 @@
+# Fuzzing — GitHub Actions. Manual + weekly short smoke runs.
+#
+# The targets in `fuzz/` reuse the same `tests/common/mod.rs` differential model
+# as the proptest suite, so any crash reproduces directly in `cargo test`.
+# Serious fuzzing is best run locally for longer; this guards against
+# regressions.
+name: Fuzz
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 3 * * 1'
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_NET_RETRY: 10
+  # See ci.yml: neutralize .cargo/config.toml's `wild` linker override.
+  RUSTFLAGS: ""
+  CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER: clang
+
+jobs:
+  fuzz:
+    name: Fuzz (${{ matrix.target }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [smallvec, ecovec, ecostring, ecobytes, map, set]
+    env:
+      RUSTUP_TOOLCHAIN: nightly
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install nightly toolchain
+        uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # master
+        with:
+          toolchain: nightly
+      - name: Install cargo-fuzz
+        uses: taiki-e/install-action@9983c65e42da123ff25d1f78505eb6de315aa172 # v2.87.20
+        with:
+          tool: cargo-fuzz
+      - name: Smoke-fuzz ${{ matrix.target }}
+        run: cargo fuzz run ${{ matrix.target }} -- -max_total_time=120 -rss_limit_mb=4096
+      - name: Upload crash artifacts
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: fuzz-artifacts-${{ matrix.target }}
+          path: fuzz/artifacts/

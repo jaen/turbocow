@@ -1,0 +1,306 @@
+# turbocow CI — GitHub Actions
+#
+# ── Two repo-local overrides this workflow deliberately neutralizes ───────
+#   - .cargo/config.toml pins clang + the `wild` linker for fast local builds.
+#     CI has no `wild`, so RUSTFLAGS is set (which replaces the config's
+#     `-fuse-ld=wild` rustflags) and the host linker is forced to plain clang
+#     (preinstalled on GitHub's Ubuntu runners).
+#   - rust-toolchain.toml pins a specific nightly; `RUSTUP_TOOLCHAIN` per job
+#     overrides it so the toolchain matrix (MSRV / beta / stable) is real.
+#
+# Third-party actions are pinned to full commit SHAs (release in the comment).
+name: CI
+on:
+  push:
+  pull_request:
+  schedule:
+    - cron: '0 0 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
+  # Superseded runs on branches/PRs are cancelled; master keeps every run.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/master' }}
+
+env:
+  CARGO_TERM_COLOR: always
+  # Incremental compilation is useless on fresh CI runners and only bloats the
+  # build/cache; disable it so caching stores/restores less.
+  CARGO_INCREMENTAL: 0
+  # Survive transient registry/network blips instead of failing a primed job.
+  CARGO_NET_RETRY: 10
+  # Empty RUSTFLAGS replaces .cargo/config.toml's `-fuse-ld=wild` link-arg.
+  # Steps that need extra flags (e.g. `-D warnings`) override this per-step.
+  RUSTFLAGS: ""
+  # Override the config's `linker = "clang"` target key with plain clang.
+  CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER: clang
+
+jobs:
+  test:
+    name: Test (${{ matrix.rust }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        rust: ['1.85.0', beta, stable] # 1.85.0 = rust-version in Cargo.toml
+    env:
+      RUSTUP_TOOLCHAIN: ${{ matrix.rust }} # override rust-toolchain.toml pin
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install ${{ matrix.rust }} toolchain
+        uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # master
+        with:
+          toolchain: ${{ matrix.rust }}
+          components: rustfmt
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - name: Check formatting
+        run: cargo fmt --all --check
+      - name: Check (deny warnings)
+        env:
+          RUSTFLAGS: -D warnings
+        run: cargo check
+      # The MSRV (1.85.0) row verifies the *library* compiles on 1.85 (the step
+      # above) but skips the test suite: it builds dev-dependencies, and one of
+      # them — `bump-scope` (1.4.1, rust-version 1.85.1) — exceeds the library's
+      # declared MSRV, so `cargo test` can't build on 1.85.0. Dev-deps never reach
+      # downstream consumers, so the MSRV promise is unaffected. beta/stable still
+      # run the full suite.
+      - name: Run test suite
+        if: matrix.rust != '1.85.0'
+        run: cargo test
+      - name: Check docs
+        env:
+          RUSTDOCFLAGS: -D warnings
+        run: cargo doc --no-deps --document-private-items
+
+  features:
+    name: Features (${{ matrix.features }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        features:
+          - '--no-default-features --features alloc'
+          - '--features serde'
+          - '--features rkyv'
+          - '--features allocator-api2-v02'
+          - '--features allocator-api2-v03'
+          - '--features serde,rkyv,allocator-api2-v03'
+          - '--no-default-features --features alloc,serde'
+    env:
+      RUSTUP_TOOLCHAIN: stable
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # master
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          key: ${{ matrix.features }}
+      - name: Build
+        run: cargo build ${{ matrix.features }}
+      - name: Test
+        run: cargo test ${{ matrix.features }}
+
+  docs:
+    name: Docs (docs.rs config)
+    runs-on: ubuntu-latest
+    env:
+      # docs.rs builds on nightly; the auto-cfg "Available on feature X" badges
+      # use feature(doc_cfg) + doc(auto_cfg) under --cfg docsrs.
+      RUSTUP_TOOLCHAIN: nightly
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install nightly toolchain
+        uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # master
+        with:
+          toolchain: nightly
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      # Build public docs exactly as docs.rs does (same feature set + --cfg
+      # docsrs), warnings-as-errors — so a broken intra-doc link, a removed
+      # feature gate, or any rustdoc error fails CI rather than silently breaking
+      # the published docs.rs page.
+      - name: cargo doc (as docs.rs builds it)
+        env:
+          RUSTDOCFLAGS: "--cfg docsrs -D warnings"
+        run: cargo doc --no-deps --features serde,rkyv,allocator-api2-v03
+      # Also lint internal (private-item) docs under the docs.rs feature set,
+      # catching private-intra-doc-link regressions in feature-gated code.
+      - name: cargo doc (internal, docs.rs features)
+        env:
+          RUSTDOCFLAGS: -D warnings
+        run: cargo doc --no-deps --document-private-items --features serde,rkyv,allocator-api2-v03
+
+  mutual_exclusivity:
+    name: Allocator mutual exclusivity
+    runs-on: ubuntu-latest
+    env:
+      RUSTUP_TOOLCHAIN: stable
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # master
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - name: v02 + v03 must fail
+        run: |
+          if cargo check --features 'allocator-api2-v02 allocator-api2-v03' 2>/dev/null; then
+            echo "ERROR: v02+v03 should fail with compile_error!"; exit 1
+          fi
+      - name: v02 + nightly must fail
+        run: |
+          # nightly-allocator-api requires nightly toolchain override; this
+          # check is structural (the compile_error! fires on parse) so stable
+          # is fine.
+          if cargo check --features 'allocator-api2-v02 nightly-allocator-api' 2>/dev/null; then
+            echo "ERROR: v02+nightly should fail"; exit 1
+          fi
+      - name: v03 + nightly must fail
+        run: |
+          if cargo check --features 'allocator-api2-v03 nightly-allocator-api' 2>/dev/null; then
+            echo "ERROR: v03+nightly should fail"; exit 1
+          fi
+
+  nightly_allocator_api:
+    name: nightly-allocator-api
+    runs-on: ubuntu-latest
+    env:
+      RUSTUP_TOOLCHAIN: nightly
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install nightly toolchain
+        uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # master
+        with:
+          toolchain: nightly
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - name: Build (nightly-allocator-api)
+        run: cargo build --features nightly-allocator-api
+      - name: Test (nightly-allocator-api)
+        continue-on-error: true # bump-scope dev-dep may conflict
+        run: cargo test --features nightly-allocator-api
+
+  clippy:
+    name: Clippy
+    runs-on: ubuntu-latest
+    env:
+      RUSTUP_TOOLCHAIN: stable
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # master
+        with:
+          toolchain: stable
+          components: clippy
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - name: Clippy
+        run: cargo clippy --all-targets -- -D warnings
+
+  loom:
+    name: Loom
+    runs-on: ubuntu-latest
+    env:
+      RUSTUP_TOOLCHAIN: stable
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # master
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: tools/loom-tests
+      # The loom suite lives in the standalone tools/loom-tests crate (its own
+      # lock + the `loom` dep) so `--cfg loom` does not leak into dev-deps.
+      # Running it at the repo root would match no tests and pass vacuously.
+      - name: Run loom tests
+        env:
+          RUSTFLAGS: --cfg loom
+        # --locked: use the committed tools/loom-tests/Cargo.lock as-is rather than
+        # resolving to latest — reproducible and in sync with the pre-push hook.
+        run: cargo test --release --locked --manifest-path tools/loom-tests/Cargo.toml
+
+  miri:
+    name: Miri (${{ matrix.target }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - x86_64-unknown-linux-gnu # 64-bit LE (SIMD matcher)
+          - aarch64-unknown-linux-gnu # 64-bit LE (scalar matcher)
+          - sparc64-unknown-linux-gnu # 64-bit BE
+          - i686-unknown-linux-gnu # 32-bit LE
+    env:
+      RUSTUP_TOOLCHAIN: nightly
+      # No PROPTEST_CASES here: the proptests self-limit under `cfg!(miri)` at
+      # COMPILE time — the module `proptest!` blocks run 32 cases (vs 4096
+      # native) and the N-dispatch matrices default to 8 (they still honour
+      # PROPTEST_CASES if you want to override). A handful of cases is enough to
+      # exercise the op sequences for UB; the full counts run natively.
+      # Isolation is disabled because some tests touch the filesystem (and as a
+      # belt-and-suspenders for proptest's regression-file getcwd, which is also
+      # gated off under cfg(miri)), which Miri's sandbox would otherwise block.
+      MIRIFLAGS: "-Zmiri-disable-isolation -Zmiri-strict-provenance"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install nightly + miri
+        uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # master
+        with:
+          toolchain: nightly
+          components: miri, rust-src
+      # Persist the expensive bits across runs. Biggest win is ~/.cache/miri —
+      # the per-target `cargo miri setup` sysroot — plus the compiled test
+      # binaries in target/miri.
+      - name: Cache cargo + target + Miri sysroot
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ~/.cache/miri
+            target/miri
+          key: miri-${{ matrix.target }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            miri-${{ matrix.target }}-
+      # `--tests` skips doctests (very slow under Miri); unit + integration
+      # tests, including the proptests, still run.
+      #
+      # NOTE: `cargo test --tests` collects EVERY file under tests/ as a
+      # separate integration-test binary, including tests/leak_tests.rs (which
+      # intentionally leaks via mem::forget and would abort under Miri's leak
+      # detector). The libtest `--skip` filters below exclude those three
+      # known leak tests by exact name so the leak_tests binary still builds
+      # and runs but executes zero tests (no leaks produced → no abort). When
+      # adding a NEW intentional-leak test to tests/leak_tests.rs, append its
+      # name here too — the strict step will fail loudly in CI if you forget.
+      - name: Miri (strict — no leaks tolerated)
+        run: >-
+          cargo miri test --tests --target ${{ matrix.target }} -- --skip drain_forget_after_partial_iteration --skip drain_forget_with_copy_type --skip drain_zst_forget
+      # tests/leak_tests.rs intentionally leaks memory via mem::forget(Drain);
+      # split into its own step so the strict run above stays leak-fatal.
+      - name: Miri (leak-tolerant — intentional mem::forget cases)
+        env:
+          MIRIFLAGS: "-Zmiri-disable-isolation -Zmiri-strict-provenance -Zmiri-ignore-leaks"
+        run: cargo miri test --test leak_tests --target ${{ matrix.target }}
+
+  package:
+    name: Package
+    runs-on: ubuntu-latest
+    env:
+      RUSTUP_TOOLCHAIN: stable
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # master
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      # `cargo package` builds the publishable .crate and verify-compiles it in
+      # isolation — the publishable check we want, without actually publishing.
+      - name: cargo package (publishable check)
+        run: cargo package

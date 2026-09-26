@@ -1,0 +1,182 @@
+#!/usr/bin/env bash
+# bench-parallel — run criterion benchmarks in parallel, one per core.
+#
+# Usage:
+#   bench-parallel                   # sequential (same as cargo bench-compare)
+#   bench-parallel -j 0              # parallel, auto-detect cores
+#   bench-parallel -j 4              # at most 4 in flight
+#   bench-parallel -j 0 --internal   # run internal benchmarks instead
+#   bench-parallel -j 0 --quick      # ~30 s parallel — rough sanity check
+#   bench-parallel -j 0 --ci         # ~5 min parallel — CI-grade accuracy
+#   bench-parallel -- --save-baseline opt  # extra args forwarded to criterion
+#
+# Each benchmark binary is pinned to a distinct logical core via taskset so
+# they don't contend on the same physical core's caches / frequency scaling.
+
+set -euo pipefail
+
+# ── defaults ──────────────────────────────────────────────────────────────
+JOBS=1
+BENCH_SET="comparison"  # "comparison" or "internal"
+CRITERION_ARGS=()       # extra args forwarded to each binary
+
+# ── arg parsing ───────────────────────────────────────────────────────────
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        -j|--jobs)
+            JOBS="$2"; shift 2
+            ;;
+        --internal)
+            BENCH_SET="internal"; shift
+            ;;
+        --quick)
+            CRITERION_ARGS+=(--warm-up-time 0.2 --measurement-time 0.4 --sample-size 20)
+            shift
+            ;;
+        --ci)
+            CRITERION_ARGS+=(--warm-up-time 1 --measurement-time 1)
+            shift
+            ;;
+        --)
+            shift; CRITERION_ARGS=("$@"); break
+            ;;
+        -h|--help)
+            sed -n '2,/^$/s/^# \?//p' "$0"; exit 0
+            ;;
+        *)
+            echo "Unknown flag: $1 (use -- to pass args to criterion)" >&2; exit 1
+            ;;
+    esac
+done
+
+# ── bench list ────────────────────────────────────────────────────────────
+if [[ "$BENCH_SET" == "comparison" ]]; then
+    BENCHES=(access access_static clone clone_static new new_static self_eq self_eq_static string_comparison)
+else
+    BENCHES=(ecow_new ecow_clone ecow_access ecow_eq ecow_mutate ecow_vec map_clone)
+fi
+
+# ── auto-detect cores ────────────────────────────────────────────────────
+NCPUS=$(nproc)
+if [[ "$JOBS" == "0" ]]; then
+    JOBS=$NCPUS
+fi
+# Cap to number of benchmarks (no point having more slots than work)
+if (( JOBS > ${#BENCHES[@]} )); then
+    JOBS=${#BENCHES[@]}
+fi
+
+OUTDIR=$(mktemp -d)
+
+cleanup() {
+    local pids
+    pids=$(jobs -p 2>/dev/null) || true
+    if [[ -n "$pids" ]]; then
+        kill $pids 2>/dev/null || true
+        wait $pids 2>/dev/null || true
+    fi
+    rm -rf "$OUTDIR"
+}
+trap cleanup EXIT INT TERM
+
+echo "▸ benchmarks : ${BENCHES[*]}"
+echo "▸ parallelism: $JOBS  (${NCPUS} logical cores)"
+echo "▸ output dir : $OUTDIR"
+if [[ ${#CRITERION_ARGS[@]} -gt 0 ]]; then
+    echo "▸ criterion  : ${CRITERION_ARGS[*]}"
+fi
+echo
+
+# ── step 1: build all bench binaries ─────────────────────────────────────
+BENCH_FLAGS=()
+for b in "${BENCHES[@]}"; do
+    BENCH_FLAGS+=(--bench "$b")
+done
+
+echo "── building ${#BENCHES[@]} benchmark binaries ──"
+cargo bench --manifest-path benches/Cargo.toml "${BENCH_FLAGS[@]}" --no-run 2>&1
+echo
+
+# ── step 2: discover binary paths via --message-format=json ──────────────
+declare -A BIN_MAP
+for b in "${BENCHES[@]}"; do
+    bin=$(cargo bench --manifest-path benches/Cargo.toml --bench "$b" --no-run --message-format=json 2>/dev/null \
+        | jq -r 'select(.executable != null) | .executable' \
+        | tail -1)
+    if [[ -z "$bin" || ! -x "$bin" ]]; then
+        echo "ERROR: could not find binary for bench '$b'" >&2; exit 1
+    fi
+    BIN_MAP[$b]="$bin"
+done
+
+# ── step 3: run in parallel with core pinning ────────────────────────────
+
+PIDS=()
+NAMES=()
+SLOT=0      # next core to pin to
+RUNNING=0   # how many children are in flight
+
+run_bench() {
+    local name="$1"
+    local bin="${BIN_MAP[$name]}"
+    local core=$((SLOT % NCPUS))
+    SLOT=$((SLOT + 1))
+
+    local outfile="$OUTDIR/${name}.txt"
+    echo "  ▸ starting  $name  (core $core)"
+    taskset -c "$core" "$bin" --bench "${CRITERION_ARGS[@]}" > "$outfile" 2>&1 &
+    PIDS+=($!)
+    NAMES+=("$name")
+    RUNNING=$((RUNNING + 1))
+}
+
+# Wait until running < JOBS, reaping finished children.
+drain_to() {
+    local limit="$1"
+    while (( RUNNING > limit )); do
+        # Wait for any one child
+        for i in "${!PIDS[@]}"; do
+            if ! kill -0 "${PIDS[$i]}" 2>/dev/null; then
+                wait "${PIDS[$i]}" || true
+                unset 'PIDS[i]'
+                unset 'NAMES[i]'
+                RUNNING=$((RUNNING - 1))
+            fi
+        done
+        # Compact arrays
+        PIDS=("${PIDS[@]}")
+        NAMES=("${NAMES[@]}")
+        if (( RUNNING >= limit )); then
+            sleep 0.2
+        fi
+    done
+}
+
+if (( JOBS == 1 )); then
+    echo "── running sequentially ──"
+    for b in "${BENCHES[@]}"; do
+        echo "  ▸ $b"
+        "${BIN_MAP[$b]}" --bench "${CRITERION_ARGS[@]}" 2>&1
+    done
+else
+    echo "── running with -j $JOBS ──"
+    for b in "${BENCHES[@]}"; do
+        drain_to $((JOBS - 1))
+        run_bench "$b"
+    done
+
+    # Wait for stragglers
+    echo "  ▸ waiting for remaining benchmarks…"
+    for pid in "${PIDS[@]}"; do
+        wait "$pid" || true
+    done
+
+    # Print collected output, ordered by bench name
+    echo
+    echo "══════════════════════════════════════════════════════════════"
+    for b in "${BENCHES[@]}"; do
+        echo "── $b ──"
+        cat "$OUTDIR/${b}.txt"
+        echo
+    done
+fi

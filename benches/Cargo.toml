@@ -1,0 +1,167 @@
+# Standalone benchmark crate (not published, not a workspace member — mirrors
+# tools/loom-tests). Keeping the benches + their comparison libraries (criterion,
+# im, compact_str, …) in their own crate means `cargo test` / `cargo clippy
+# --all-targets` / coverage of the turbocow crate no longer compile that ~56-crate
+# stack.
+#
+# Run from the repo root:
+#   cargo bench --manifest-path benches/Cargo.toml [--bench NAME]
+# or via the `bench-compare` / `bench-internal` aliases / `bench-parallel`.
+[package]
+name = "turbocow-benches"
+version = "0.0.0"
+edition = "2024"
+publish = false
+# Only the explicit [[bench]] targets below — no lib/bin/test autodiscovery.
+autolib = false
+autobins = false
+autotests = false
+autobenches = false
+
+[dependencies]
+turbocow = { path = "..", features = ["std", "alloc"] }
+criterion = { version = "0.7.0", features = ["html_reports"] }
+
+# Comparison targets benchmarked against turbocow.
+ecow = "0.3.1"
+compact_str = "0.9.0"
+hipstr = "0.8.0"
+lean_string = "0.5.1"
+smallvec = "1.13"
+# Small-map / set comparison targets for the `small_map` bench:
+#   litemap  — sorted-Vec map (dynamic)
+#   im       — persistent HAMT map/set with cheap structural-sharing clone
+#   micromap — fixed-capacity flat map
+#   heapless — fixed-capacity linear map
+litemap = "0.8.2"
+micromap = "0.3.0"
+im = "15.1.0"
+heapless = "0.9.1"
+
+# hotpath profiler — the FULL feature set incl. the in-process MCP server
+# (`hotpath-mcp` → axum/rmcp/tokio/schemars). cfg-gated like turbocow's own hotpath
+# dep, so a plain `cargo bench` / `cargo test` here never compiles it; only the
+# `cargo hotpath` wrapper (`--cfg hotpath`) pulls it in. turbocow itself declares only
+# the light `hotpath` feature, keeping this heavy stack out of turbocow consumers'
+# lockfiles; under `--cfg hotpath` Cargo unifies the two requests in THIS build, so
+# turbocow's own `src/` annotations are measured and the `/mcp` server compiles for the
+# proxy/live-query workflow.
+[target.'cfg(hotpath)'.dependencies]
+hotpath = { version = "0.17", features = ["hotpath", "hotpath-mcp"] }
+
+# Match the turbocow crate's bench/profiling profiles so results + `cargo hotpath`
+# (which builds with `--profile profiling`) behave the same as before the split.
+[profile.bench]
+opt-level = 3
+debug = false
+lto = "thin"
+codegen-units = 1
+incremental = true
+overflow-checks = false
+
+[profile.profiling]
+inherits = "release"
+debug = true
+strip = false
+
+# ── Comparison benchmarks (rosetta-style, multi-library) ──────────────────
+[[bench]]
+name = "access"
+path = "comparison/access.rs"
+harness = false
+
+[[bench]]
+name = "access_static"
+path = "comparison/access_static.rs"
+harness = false
+
+[[bench]]
+name = "clone"
+path = "comparison/clone.rs"
+harness = false
+
+[[bench]]
+name = "clone_static"
+path = "comparison/clone_static.rs"
+harness = false
+
+[[bench]]
+name = "new"
+path = "comparison/new.rs"
+harness = false
+
+[[bench]]
+name = "new_static"
+path = "comparison/new_static.rs"
+harness = false
+
+[[bench]]
+name = "self_eq"
+path = "comparison/self_eq.rs"
+harness = false
+
+[[bench]]
+name = "self_eq_static"
+path = "comparison/self_eq_static.rs"
+harness = false
+
+[[bench]]
+name = "string_comparison"
+path = "comparison/string_comparison.rs"
+harness = false
+
+[[bench]]
+name = "small_vec"
+path = "comparison/small_vec.rs"
+harness = false
+
+[[bench]]
+name = "small_map"
+path = "comparison/small_map.rs"
+harness = false
+
+# ── Internal benchmarks (turbocow-specific) ──────────────────────────────
+[[bench]]
+name = "ecow_new"
+path = "internal/ecow_new.rs"
+harness = false
+
+[[bench]]
+name = "ecow_clone"
+path = "internal/ecow_clone.rs"
+harness = false
+
+[[bench]]
+name = "ecow_access"
+path = "internal/ecow_access.rs"
+harness = false
+
+[[bench]]
+name = "ecow_eq"
+path = "internal/ecow_eq.rs"
+harness = false
+
+[[bench]]
+name = "ecow_mutate"
+path = "internal/ecow_mutate.rs"
+harness = false
+
+[[bench]]
+name = "ecow_vec"
+path = "internal/ecow_vec.rs"
+harness = false
+
+[[bench]]
+name = "map_clone"
+path = "internal/map_clone.rs"
+harness = false
+
+[[bench]]
+name = "optimizations"
+path = "internal/optimizations.rs"
+harness = false
+
+[[bench]]
+name = "smallmap_dispatch"
+path = "internal/smallmap_dispatch.rs"
+harness = false

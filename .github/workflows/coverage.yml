@@ -1,0 +1,64 @@
+# Coverage — GitHub Actions
+#
+# Produces an lcov.info artifact per feature set. To publish to Codecov, add a
+# CODECOV_TOKEN repository secret and uncomment the upload step.
+name: Coverage
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/master' }}
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+  CARGO_NET_RETRY: 10
+  # See ci.yml: neutralize .cargo/config.toml's `wild` linker override.
+  RUSTFLAGS: ""
+  CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER: clang
+
+jobs:
+  coverage:
+    name: Coverage (${{ matrix.features || 'default' }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        features:
+          - '' # default (std + alloc)
+          - '--features serde,rkyv'
+          - '--features allocator-api2-v03'
+          - '--no-default-features --features alloc,serde'
+    env:
+      RUSTUP_TOOLCHAIN: stable
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # master
+        with:
+          toolchain: stable
+          components: llvm-tools-preview
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@9983c65e42da123ff25d1f78505eb6de315aa172 # v2.87.20
+        with:
+          tool: cargo-llvm-cov
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          key: ${{ matrix.features }}
+      - name: Generate code coverage
+        run: cargo llvm-cov ${{ matrix.features }} --lcov --output-path lcov.info
+      # - name: Upload coverage to Codecov
+      #   uses: codecov/codecov-action@v5
+      #   with:
+      #     files: lcov.info
+      #     token: ${{ secrets.CODECOV_TOKEN }}
+      - name: Archive lcov.info
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: coverage-lcov-${{ strategy.job-index }}
+          path: lcov.info

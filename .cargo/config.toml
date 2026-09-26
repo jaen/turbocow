@@ -1,0 +1,10 @@
+[alias]
+bench-compare = "bench --manifest-path benches/Cargo.toml --bench access --bench access_static --bench clone --bench clone_static --bench new --bench new_static --bench self_eq --bench self_eq_static --bench string_comparison"
+bench-internal = "bench --manifest-path benches/Cargo.toml --bench ecow_new --bench ecow_clone --bench ecow_access --bench ecow_eq --bench ecow_mutate --bench ecow_vec"
+
+# NOTE: for parallel benchmarks use bench-parallel -j 0
+# (cargo aliases cannot spawn parallel processes)
+
+[target.'cfg(target_os = "linux")']
+linker = "clang"
+rustflags = ["-C", "link-arg=-fuse-ld=wild"]

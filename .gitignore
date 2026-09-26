@@ -1,0 +1,15 @@
+/target
+/tools/loom-tests/target
+/benches/target
+.DS_Store
+.direnv/
+.roo/
+.vscode/
+result
+/reference/
+.hotpath-proxy.yaml
+rustc-ice-*.txt
+.mcp.json
+.cursor/mcp.json
+.pre-commit-config.yaml
+.worktrees/

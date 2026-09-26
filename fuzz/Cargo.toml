@@ -1,0 +1,61 @@
+[package]
+name = "turbocow-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+arbitrary = { version = "1", features = ["derive"] }
+turbocow = { path = ".." }
+
+# Each target decodes an `arbitrary` op stream and runs the SAME differential
+# model used by tests/proptest_*.rs (shared via `#[path]` include), so a
+# fuzzer-found input reproduces directly in the proptest suite.
+[[bin]]
+name = "smallvec"
+path = "fuzz_targets/smallvec.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "ecovec"
+path = "fuzz_targets/ecovec.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "ecostring"
+path = "fuzz_targets/ecostring.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "map"
+path = "fuzz_targets/map.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "set"
+path = "fuzz_targets/set.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "ecobytes"
+path = "fuzz_targets/ecobytes.rs"
+test = false
+doc = false
+bench = false
+
+# Own workspace so `cargo fuzz` doesn't pull in the parent crate's build graph.
+[workspace]

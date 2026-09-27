@@ -6,7 +6,6 @@ authors = ["jaen <hi@jaen.me>"]
 edition = "2024"
 description = "Compact, clone-on-write vectors, strings, maps and sets with inline + referenced storage — a superset of ecow."
 repository = "https://github.com/jaen/turbocow"
-homepage = "https://github.com/jaen/turbocow"
 documentation = "https://docs.rs/turbocow"
 readme = "README.md"
 license = "MIT OR Apache-2.0"

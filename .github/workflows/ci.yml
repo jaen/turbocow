@@ -100,7 +100,8 @@ jobs:
           toolchain: stable
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
-          key: ${{ matrix.features }}
+          # Cache keys may not contain commas, so key by matrix index.
+          key: features-${{ strategy.job-index }}
       - name: Build
         run: cargo build ${{ matrix.features }}
       - name: Test
@@ -180,9 +181,17 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       - name: Build (nightly-allocator-api)
         run: cargo build --features nightly-allocator-api
+      # The test suite's `bump-scope` dev-dependency (1.4.1) does not build
+      # against current nightly's `Allocator` trait, so a failure here is
+      # reported as a warning rather than failing the job; a notice flags when
+      # it starts passing again.
       - name: Test (nightly-allocator-api)
-        continue-on-error: true # bump-scope dev-dep may conflict
-        run: cargo test --features nightly-allocator-api
+        run: |
+          if cargo test --features nightly-allocator-api; then
+            echo "::notice title=nightly-allocator-api::Tests build and pass again; consider making this step blocking."
+          else
+            echo "::warning title=nightly-allocator-api::Tests failed (known: bump-scope dev-dep vs nightly Allocator); library build above passed."
+          fi
 
   clippy:
     name: Clippy
@@ -299,7 +308,8 @@ jobs:
         uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # master
         with:
           toolchain: stable
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      # No rust-cache here: its post-job target cleanup chokes on the
+      # `target/package/` tree that `cargo package` leaves behind.
       # `cargo package` builds the publishable .crate and verify-compiles it in
       # isolation — the publishable check we want, without actually publishing.
       - name: cargo package (publishable check)

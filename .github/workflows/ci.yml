@@ -25,15 +25,12 @@ on:
   schedule:
     - cron: '0 0 * * 1'
   workflow_dispatch:
-
 permissions:
   contents: read
-
 concurrency:
   group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
   # Superseded runs on branches/PRs are cancelled; master keeps every run.
   cancel-in-progress: ${{ github.ref != 'refs/heads/master' }}
-
 env:
   CARGO_TERM_COLOR: always
   # Incremental compilation is useless on fresh CI runners and only bloats the
@@ -46,7 +43,6 @@ env:
   RUSTFLAGS: ""
   # Override the config's `linker = "clang"` target key with plain clang.
   CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER: clang
-
 jobs:
   test:
     name: Test (${{ matrix.rust }})
@@ -82,7 +78,6 @@ jobs:
         env:
           RUSTDOCFLAGS: -D warnings
         run: cargo doc --no-deps --document-private-items
-
   features:
     name: Features (${{ matrix.features }})
     runs-on: ubuntu-latest
@@ -111,7 +106,6 @@ jobs:
         run: cargo build ${{ matrix.features }}
       - name: Test
         run: cargo test ${{ matrix.features }}
-
   docs:
     name: Docs (docs.rs config)
     runs-on: ubuntu-latest
@@ -140,7 +134,6 @@ jobs:
         env:
           RUSTDOCFLAGS: -D warnings
         run: cargo doc --no-deps --document-private-items --features serde,rkyv
-
   clippy:
     name: Clippy
     runs-on: ubuntu-latest
@@ -156,7 +149,6 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       - name: Clippy
         run: cargo clippy --all-targets -- -D warnings
-
   loom:
     name: Loom
     runs-on: ubuntu-latest
@@ -180,7 +172,6 @@ jobs:
         # --locked: use the committed tools/loom-tests/Cargo.lock as-is rather than
         # resolving to latest — reproducible and in sync with the pre-push hook.
         run: cargo test --release --locked --manifest-path tools/loom-tests/Cargo.toml
-
   miri:
     name: Miri (${{ matrix.target }})
     runs-on: ubuntu-latest
@@ -244,7 +235,6 @@ jobs:
         env:
           MIRIFLAGS: "-Zmiri-disable-isolation -Zmiri-strict-provenance -Zmiri-ignore-leaks"
         run: cargo miri test --test leak_tests --target ${{ matrix.target }}
-
   package:
     name: Package
     runs-on: ubuntu-latest

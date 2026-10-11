@@ -9,17 +9,14 @@ on:
   workflow_dispatch:
   schedule:
     - cron: '0 3 * * 1'
-
 permissions:
   contents: read
-
 env:
   CARGO_TERM_COLOR: always
   CARGO_NET_RETRY: 10
   # See ci.yml: neutralize .cargo/config.toml's `wild` linker override.
   RUSTFLAGS: ""
   CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER: clang
-
 jobs:
   fuzz:
     name: Fuzz (${{ matrix.target }})

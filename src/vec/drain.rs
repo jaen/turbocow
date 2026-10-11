@@ -11,13 +11,14 @@
 //! not-yet-yielded drained elements and moves the untouched tail back to close
 //! the gap, restoring the correct length.
 
+use core::alloc::Allocator;
 use core::fmt;
 use core::iter::FusedIterator;
 use core::mem;
 use core::ptr::{self, NonNull};
 use core::slice;
 
-use crate::allocator::{AllocatorProvider, Global};
+use crate::Global;
 use crate::vec::types::EcoVec;
 
 /// A draining iterator for [`EcoVec<T>`](crate::EcoVec).
@@ -28,7 +29,7 @@ use crate::vec::types::EcoVec;
 /// The second type parameter defaults to `Global` so that
 /// `turbocow::vec::Drain<'_, T>` resolves without an explicit allocator,
 /// matching ecow's single-parameter `ecow::vec::Drain<'_, T>`.
-pub struct Drain<'a, T: 'a, A: AllocatorProvider = Global> {
+pub struct Drain<'a, T: 'a, A: Allocator = Global> {
     /// Index of the tail to preserve.
     pub(crate) tail_start: usize,
     /// Length of the tail.
@@ -41,13 +42,13 @@ pub struct Drain<'a, T: 'a, A: AllocatorProvider = Global> {
     pub(crate) vec: NonNull<EcoVec<T, A>>,
 }
 
-impl<T: fmt::Debug, A: AllocatorProvider> fmt::Debug for Drain<'_, T, A> {
+impl<T: fmt::Debug, A: Allocator> fmt::Debug for Drain<'_, T, A> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_tuple("Drain").field(&self.iter.as_slice()).finish()
     }
 }
 
-impl<'a, T, A: AllocatorProvider> Drain<'a, T, A> {
+impl<'a, T, A: Allocator> Drain<'a, T, A> {
     /// Returns the remaining items of this iterator as a slice.
     #[must_use]
     pub fn as_slice(&self) -> &[T] {
@@ -55,7 +56,7 @@ impl<'a, T, A: AllocatorProvider> Drain<'a, T, A> {
     }
 }
 
-impl<T, A: AllocatorProvider> AsRef<[T]> for Drain<'_, T, A> {
+impl<T, A: Allocator> AsRef<[T]> for Drain<'_, T, A> {
     fn as_ref(&self) -> &[T] {
         self.as_slice()
     }
@@ -67,10 +68,10 @@ impl<T, A: AllocatorProvider> AsRef<[T]> for Drain<'_, T, A> {
 // sufficient because the allocator is only used during element drop on the
 // owning thread and `EcoVec`'s own `Send`/`Sync` already require the allocator
 // to be thread-safe.
-unsafe impl<T: Sync, A: AllocatorProvider + Sync> Sync for Drain<'_, T, A> {}
-unsafe impl<T: Send, A: AllocatorProvider + Send> Send for Drain<'_, T, A> {}
+unsafe impl<T: Sync, A: Allocator + Sync> Sync for Drain<'_, T, A> {}
+unsafe impl<T: Send, A: Allocator + Send> Send for Drain<'_, T, A> {}
 
-impl<T, A: AllocatorProvider> Iterator for Drain<'_, T, A> {
+impl<T, A: Allocator> Iterator for Drain<'_, T, A> {
     type Item = T;
 
     #[inline]
@@ -88,7 +89,7 @@ impl<T, A: AllocatorProvider> Iterator for Drain<'_, T, A> {
     }
 }
 
-impl<T, A: AllocatorProvider> DoubleEndedIterator for Drain<'_, T, A> {
+impl<T, A: Allocator> DoubleEndedIterator for Drain<'_, T, A> {
     #[inline]
     fn next_back(&mut self) -> Option<T> {
         // Safety: see `next`.
@@ -96,13 +97,13 @@ impl<T, A: AllocatorProvider> DoubleEndedIterator for Drain<'_, T, A> {
     }
 }
 
-impl<T, A: AllocatorProvider> Drop for Drain<'_, T, A> {
+impl<T, A: Allocator> Drop for Drain<'_, T, A> {
     fn drop(&mut self) {
         /// Moves back the un-`Drain`ed elements to restore the original
         /// vector, even if dropping a drained element panics.
-        struct DropGuard<'r, 'a, T, A: AllocatorProvider>(&'r mut Drain<'a, T, A>);
+        struct DropGuard<'r, 'a, T, A: Allocator>(&'r mut Drain<'a, T, A>);
 
-        impl<T, A: AllocatorProvider> Drop for DropGuard<'_, '_, T, A> {
+        impl<T, A: Allocator> Drop for DropGuard<'_, '_, T, A> {
             fn drop(&mut self) {
                 if self.0.tail_len > 0 {
                     unsafe {
@@ -194,7 +195,7 @@ impl<T, A: AllocatorProvider> Drop for Drain<'_, T, A> {
 /// - `T` must be a ZST (this is only correct because dropping ZSTs needs no
 ///   pointer identity).
 #[inline]
-unsafe fn drop_zst_tail<T, A: AllocatorProvider>(vec: &mut EcoVec<T, A>, target: usize) {
+unsafe fn drop_zst_tail<T, A: Allocator>(vec: &mut EcoVec<T, A>, target: usize) {
     debug_assert!(mem::size_of::<T>() == 0);
     let len = vec.len();
     debug_assert!(target <= len);
@@ -213,6 +214,6 @@ unsafe fn drop_zst_tail<T, A: AllocatorProvider>(vec: &mut EcoVec<T, A>, target:
     }
 }
 
-impl<T, A: AllocatorProvider> ExactSizeIterator for Drain<'_, T, A> {}
+impl<T, A: Allocator> ExactSizeIterator for Drain<'_, T, A> {}
 
-impl<T, A: AllocatorProvider> FusedIterator for Drain<'_, T, A> {}
+impl<T, A: Allocator> FusedIterator for Drain<'_, T, A> {}

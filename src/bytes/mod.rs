@@ -9,7 +9,7 @@ use core::fmt::{self, Debug, Formatter};
 use core::hash::{Hash, Hasher};
 use core::ops::Deref;
 
-use crate::allocator::Global;
+use crate::Global;
 use crate::dynamic::{DynamicVec, InlineVec, LIMIT};
 use crate::string::EcoString;
 use crate::vec::EcoVec;

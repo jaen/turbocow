@@ -37,7 +37,7 @@ use core::fmt;
 use core::ops::Index;
 
 use crate::EcoVec;
-use crate::allocator::Global;
+use crate::Global;
 
 // ── Type ────────────────────────────────────────────────────────────────
 

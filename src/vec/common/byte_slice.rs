@@ -1,11 +1,11 @@
+use core::alloc::Allocator;
 use core::ptr;
 
-use crate::allocator::AllocatorProvider;
 use crate::vec::types::EcoVec;
 
 impl<A> EcoVec<u8, A>
 where
-    A: AllocatorProvider + Clone,
+    A: Allocator + Clone,
 {
     /// Copies from a byte slice.
     #[allow(unused)]

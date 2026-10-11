@@ -1,23 +1,15 @@
 //! Comprehensive test suite for allocator API implementation
 //! This file provides extended testing including edge cases, property-based tests, and performance validation
 
-#![cfg(any(
-    feature = "allocator-api2-v02",
-    feature = "allocator-api2-v03",
-    feature = "nightly-allocator-api"
-))]
-#![cfg_attr(feature = "nightly-allocator-api", feature(allocator_api))]
-
 use std::collections::HashSet;
 use std::sync::Arc;
 use std::thread;
-use turbocow::{EcoVec, Global};
+use turbocow::{EcoVec, Global, eco_vec};
 
-#[cfg(feature = "allocator-api2-v02")]
-use bump_scope::Bump;
+use bump_scope::{Bump, settings::BumpSettings};
 
-#[cfg(feature = "allocator-api2-v02")]
-type SimpleBump = Bump<allocator_api2_02::alloc::Global, 1, true, false, true>;
+// Minimum alignment 1, bumps upward, not guaranteed to be allocated.
+type SimpleBump = Bump<Global, BumpSettings<1, true, false>>;
 
 // ============================================================================
 // EDGE CASE TESTS
@@ -33,7 +25,6 @@ fn test_empty_allocator_operations() {
 }
 
 #[test]
-#[cfg(feature = "allocator-api2-v02")]
 fn test_zero_capacity_allocation() {
     let bump = SimpleBump::new();
 
@@ -44,7 +35,6 @@ fn test_zero_capacity_allocation() {
 }
 
 #[test]
-#[cfg(feature = "allocator-api2-v02")]
 fn test_single_element_operations() {
     let bump = SimpleBump::new();
 
@@ -58,7 +48,6 @@ fn test_single_element_operations() {
 }
 
 #[test]
-#[cfg(feature = "allocator-api2-v02")]
 fn test_repeated_grow_shrink_operations() {
     let bump = SimpleBump::new();
     let mut vec: EcoVec<i32, _> = EcoVec::new_in(&bump);
@@ -88,7 +77,6 @@ fn test_repeated_grow_shrink_operations() {
 // ============================================================================
 
 #[test]
-#[cfg(feature = "allocator-api2-v02")]
 fn property_vec_len_capacity_invariant() {
     let bump = SimpleBump::new();
 
@@ -104,7 +92,6 @@ fn property_vec_len_capacity_invariant() {
 }
 
 #[test]
-#[cfg(feature = "allocator-api2-v02")]
 fn property_clone_equality() {
     let bump = SimpleBump::new();
 
@@ -119,7 +106,6 @@ fn property_clone_equality() {
 }
 
 #[test]
-#[cfg(feature = "allocator-api2-v02")]
 fn property_push_pop_reversibility() {
     let bump = SimpleBump::new();
     let mut vec: EcoVec<i32, _> = EcoVec::new_in(&bump);
@@ -139,7 +125,6 @@ fn property_push_pop_reversibility() {
 }
 
 #[test]
-#[cfg(feature = "allocator-api2-v02")]
 fn property_extend_from_slice_correctness() {
     let bump = SimpleBump::new();
 
@@ -162,7 +147,6 @@ fn property_extend_from_slice_correctness() {
 // ============================================================================
 
 #[test]
-#[cfg(feature = "allocator-api2-v02")]
 fn test_different_allocator_instances() {
     // Each bump allocator is independent
     let bump1 = SimpleBump::new();
@@ -246,16 +230,17 @@ fn test_arc_wrapped_allocator_operations() {
 // ============================================================================
 
 #[test]
-#[cfg(feature = "allocator-api2-v02")]
 fn test_large_scale_allocations() {
     use std::alloc::Layout;
-    // Create layout for 10MB
+    // Miri is ~1000x slower; a few dozen vectors still cover the code paths.
+    let count = if cfg!(miri) { 20 } else { 1000 };
+    // Create layout for 10MB (enough for 1000 * 100 usizes)
     let layout = Layout::from_size_align(10 * 1024 * 1024, 8).unwrap();
     let bump = SimpleBump::with_capacity(layout);
 
     // Create many small allocations
     let mut vecs = Vec::new();
-    for i in 0..1000 {
+    for i in 0..count {
         let vec: EcoVec<usize, _> = EcoVec::from_elem_in(i, 100, &bump);
         vecs.push(vec);
     }
@@ -272,7 +257,6 @@ fn test_large_scale_allocations() {
 // ============================================================================
 
 #[test]
-#[cfg(feature = "allocator-api2-v02")]
 fn test_bump_allocator_reset_semantics() {
     // Test bump allocator's specific behavior
     let bump = SimpleBump::new();
@@ -316,17 +300,16 @@ fn test_global_allocator_deallocation() {
 // ============================================================================
 
 #[test]
-fn test_eco_vec_macro_with_allocator_features() {
-    // Test that macro still works when allocator features are enabled
-    // The macro uses Global allocator by default
-    #[cfg(feature = "allocator-api2-v02")]
-    {
-        let bump = SimpleBump::new();
-        // Manual construction with allocator
-        let vec_with_alloc: EcoVec<i32, _> =
-            EcoVec::from_slice_in(&[1, 2, 3, 4, 5], &bump);
-        assert_eq!(vec_with_alloc.as_slice(), &[1, 2, 3, 4, 5]);
-    }
+fn test_eco_vec_macro_with_allocator() {
+    // The macro uses the Global allocator unless one is given with `in`
+    let bump = SimpleBump::new();
+    // Manual construction with allocator
+    let vec_with_alloc: EcoVec<i32, _> = EcoVec::from_slice_in(&[1, 2, 3, 4, 5], &bump);
+    assert_eq!(vec_with_alloc.as_slice(), &[1, 2, 3, 4, 5]);
+
+    // Macro construction with allocator
+    let vec_macro: EcoVec<i32, _> = eco_vec![in &bump; 1, 2, 3, 4, 5];
+    assert_eq!(vec_macro.as_slice(), &[1, 2, 3, 4, 5]);
 
     // Test Global allocator variant
     let vec_global: EcoVec<i32, Global> =
@@ -339,7 +322,6 @@ fn test_eco_vec_macro_with_allocator_features() {
 // ============================================================================
 
 #[test]
-#[cfg(feature = "allocator-api2-v02")]
 fn test_operations_after_clear() {
     let bump = SimpleBump::new();
     let mut vec: EcoVec<String, _> = EcoVec::from_slice_in(
@@ -359,7 +341,6 @@ fn test_operations_after_clear() {
 }
 
 #[test]
-#[cfg(feature = "allocator-api2-v02")]
 fn test_truncate_to_various_sizes() {
     let bump = SimpleBump::new();
     let mut vec: EcoVec<i32, _> =
@@ -404,7 +385,6 @@ fn test_type_inference_with_allocators() {
 }
 
 #[test]
-#[cfg(feature = "allocator-api2-v02")]
 fn test_complex_types_with_allocator() {
     let bump = SimpleBump::new();
 

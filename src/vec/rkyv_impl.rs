@@ -3,7 +3,6 @@ use rkyv::ser::{Allocator, Writer};
 use rkyv::vec::{ArchivedVec, VecResolver};
 use rkyv::{Archive, Deserialize, Place, Serialize};
 
-use crate::allocator::AllocatorProvider;
 use crate::vec::types::EcoVec;
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -13,7 +12,7 @@ use crate::vec::types::EcoVec;
 impl<T, A> Archive for EcoVec<T, A>
 where
     T: Archive,
-    A: AllocatorProvider,
+    A: core::alloc::Allocator,
 {
     type Archived = ArchivedVec<T::Archived>;
     type Resolver = VecResolver;
@@ -30,7 +29,7 @@ where
 impl<T, A, Ser> Serialize<Ser> for EcoVec<T, A>
 where
     T: Serialize<Ser>,
-    A: AllocatorProvider,
+    A: core::alloc::Allocator,
     Ser: Fallible + Allocator + Writer + ?Sized,
 {
     fn serialize(&self, serializer: &mut Ser) -> Result<VecResolver, Ser::Error> {
@@ -46,7 +45,7 @@ impl<T, A, D> Deserialize<EcoVec<T, A>, D> for ArchivedVec<T::Archived>
 where
     T: Archive + Clone,
     T::Archived: Deserialize<T, D>,
-    A: AllocatorProvider + Default + Clone,
+    A: core::alloc::Allocator + Default + Clone,
     D: Fallible + ?Sized,
 {
     fn deserialize(&self, deserializer: &mut D) -> Result<EcoVec<T, A>, D::Error> {

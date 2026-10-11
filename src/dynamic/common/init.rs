@@ -1,7 +1,8 @@
+use core::alloc::Allocator;
 use core::mem::{ManuallyDrop, MaybeUninit};
 use core::ptr::addr_of_mut;
 
-use crate::allocator::{AllocatorProvider, Global};
+use crate::Global;
 use crate::dynamic::common::limit::LEN_VALUE_MASK_USIZE;
 use crate::dynamic::types::{DynamicVec, InlineVec, Referenced, Repr};
 use crate::utils::variance::PhantomCovariantLifetime;
@@ -50,10 +51,9 @@ impl DynamicVec<'static, LIMIT, Global> {
 
 impl<'a, const N: usize, A> DynamicVec<'a, N, A>
 where
-    A: AllocatorProvider,
+    A: Allocator,
 {
     #[inline]
-    #[allow(dead_code)]
     pub const fn new_in(alloc: A) -> Self {
         Self::from_inline(InlineVec::new_in(alloc))
     }
@@ -114,7 +114,6 @@ where
     /// explicitly to the `tagged_len` position so the variant is detected
     /// correctly on every architecture (the two overlap only on 64-bit LE).
     #[inline]
-    #[allow(dead_code)]
     pub(super) fn from_referenced(bytes: &'a [u8], alloc: A) -> Self {
         let ptr = bytes.as_ptr();
         let actual_len = bytes.len();
@@ -220,7 +219,7 @@ where
     #[inline]
     // Deliberately consumes `self` to widen the lifetime to 'static; the
     // `to_*`-takes-`&self` convention doesn't apply to this conversion.
-    #[allow(dead_code, clippy::wrong_self_convention)]
+    #[allow(clippy::wrong_self_convention)]
     pub fn to_owned(self) -> DynamicVec<'static, N, A>
     where
         A: Clone,

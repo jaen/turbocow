@@ -1,4 +1,6 @@
-use crate::allocator::{AllocatorProvider, Global};
+use core::alloc::Allocator;
+
+use crate::Global;
 use crate::dynamic::types::InlineVec;
 
 use super::limit::{LEN_INLINE_TAG, LEN_VALUE_MASK, LIMIT};
@@ -33,7 +35,6 @@ impl InlineVec<LIMIT, Global> {
 
     /// The given length may not exceed LIMIT.
     #[inline]
-    #[allow(dead_code)]
     pub const unsafe fn from_buf(buf: [u8; LIMIT], len: usize) -> Self {
         unsafe { Self::from_buf_in(buf, len, Global) }
     }
@@ -41,30 +42,12 @@ impl InlineVec<LIMIT, Global> {
 
 impl<const N: usize, A> InlineVec<N, A>
 where
-    A: AllocatorProvider,
+    A: Allocator,
 {
     #[inline]
     pub const fn new_in(allocator: A) -> Self {
         // Safety: Trivially, 0 <= N
         unsafe { Self::from_buf_in([0; N], 0, allocator) }
-    }
-
-    // Allocator-generic counterpart of the `Global` const `from_slice`.
-    // Currently unused (the const `from_slice` covers the default path);
-    // kept for the in-progress allocator-api feature work.
-    #[inline]
-    #[allow(dead_code)]
-    pub fn from_slice_in(bytes: &[u8], allocator: A) -> Result<Self, ()> {
-        let len = bytes.len();
-        if len > N {
-            return Err(());
-        }
-
-        let mut buf = [0; N];
-        buf[..len].copy_from_slice(bytes);
-
-        // Safety: If len > N, Err was returned earlier.
-        unsafe { Ok(Self::from_buf_in(buf, len, allocator)) }
     }
 
     /// The given length may not exceed N.

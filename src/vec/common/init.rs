@@ -1,6 +1,7 @@
+use core::alloc::Allocator;
 use core::marker::PhantomData;
 
-use crate::allocator::{AllocatorProvider, Global};
+use crate::Global;
 use crate::vec::types::EcoVec;
 
 impl<T> EcoVec<T, Global> {
@@ -32,7 +33,7 @@ impl<T> EcoVec<T, Global> {
 
 impl<T, A> EcoVec<T, A>
 where
-    A: AllocatorProvider,
+    A: Allocator,
 {
     /// Create a new, empty vector using the specified allocator.
     #[inline(always)]
@@ -90,7 +91,7 @@ where
 impl<T, A> EcoVec<T, A>
 where
     T: Clone,
-    A: AllocatorProvider + Clone,
+    A: Allocator + Clone,
 {
     /// Create a new vector with `n` copies of `value` using the specified allocator.
     pub fn from_elem_in(value: T, n: usize, alloc: A) -> Self {
@@ -117,7 +118,7 @@ where
 impl<T, A> EcoVec<T, A>
 where
     T: Copy + Clone,
-    A: AllocatorProvider + Clone,
+    A: Allocator + Clone,
 {
     /// Create a new vector with `n` copies of `value` using memcpy.
     ///

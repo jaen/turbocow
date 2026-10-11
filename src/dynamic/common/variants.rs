@@ -1,11 +1,12 @@
-use crate::allocator::AllocatorProvider;
+use core::alloc::Allocator;
+
 use crate::dynamic::types::{DynamicVec, Variant, VariantMut};
 
 use super::limit::{LEN_INLINE_TAG, LEN_TAGS};
 
 impl<'a, const N: usize, A> DynamicVec<'a, N, A>
 where
-    A: AllocatorProvider,
+    A: Allocator,
 {
     // If this returns true, guarantees that `self.0.inline` is initialized.
     // (Also true for the Referenced variant — check `is_referenced` first.)

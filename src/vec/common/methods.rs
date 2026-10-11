@@ -1,8 +1,8 @@
+use core::alloc::{Allocator, Layout};
 use core::marker::PhantomData;
 use core::mem;
 use core::ptr::{self, NonNull};
 
-use crate::allocator::{AllocatorProvider, alloc::Layout};
 use crate::sync::atomic::Ordering::*;
 
 use crate::utils::max;
@@ -16,17 +16,17 @@ pub(in crate::vec) fn capacity_overflow() -> ! {
 
 #[cold]
 #[track_caller]
-pub(in crate::vec) fn ref_count_overflow<T, A: AllocatorProvider>(
+pub(in crate::vec) fn ref_count_overflow<T, A: Allocator>(
     ptr: NonNull<T>,
     len: usize,
     alloc: A,
 ) -> ! {
-    // Roll back the `fetch_add(1)` from `Clone::clone` (cloneable.rs:502) by
-    // dropping a temporary EcoVec that shares the allocation. `Drop` does
-    // `fetch_sub(1, Release)` and, because the count is still far above 1
-    // after overflow, returns early without deallocating — so `alloc` is never
-    // used, but is passed to keep the temporary well-formed. Matches ecow 0.3.0:
-    // reference/ecow/src/vec.rs:1231.
+    // Roll back the `fetch_add(1)` from `EcoVec::clone_shared` (the body of
+    // every `Clone` impl, in cloneable.rs) by dropping a temporary EcoVec that
+    // shares the allocation. `Drop` does `fetch_sub(1, Release)` and, because
+    // the count is still far above 1 after overflow, returns early without
+    // deallocating — so `alloc` is never used, but is passed to keep the
+    // temporary well-formed. Matches ecow 0.3.0: reference/ecow/src/vec.rs:1231.
     drop(EcoVec { ptr, len, alloc, phantom: PhantomData });
     panic!("reference count overflow");
 }
@@ -37,11 +37,10 @@ pub(in crate::vec) fn out_of_bounds(index: usize, len: usize) -> ! {
     panic!("index is out bounds (index: {index}, len: {len})");
 }
 
-// Debug implementation for allocator-aware EcoVec
 impl<T, A> core::fmt::Debug for EcoVec<T, A>
 where
     T: core::fmt::Debug,
-    A: AllocatorProvider,
+    A: Allocator,
 {
     #[inline]
     fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
@@ -51,7 +50,7 @@ where
 
 impl<T, A> EcoVec<T, A>
 where
-    A: AllocatorProvider,
+    A: Allocator,
 {
     /// Returns a reference to the allocator.
     #[inline]
@@ -294,7 +293,7 @@ mod tests {
 
     // Regression test for ref_count_overflow rollback (#15).
     //
-    // Clone::clone does `fetch_add(1)` before checking for overflow. On
+    // `clone_shared` does `fetch_add(1)` before checking for overflow. On
     // overflow, `ref_count_overflow` must undo that increment by dropping a
     // temporary EcoVec (whose Drop does `fetch_sub(1)`). The genuine overflow
     // path requires `isize::MAX` clones (practically unreachable), so we
@@ -310,7 +309,7 @@ mod tests {
         let v: crate::EcoVec<u32> = eco_vec![1, 2, 3];
         let _clone = v.clone(); // refs = 2
 
-        // Simulate the `fetch_add(1)` that `Clone::clone` performs before the
+        // Simulate the `fetch_add(1)` that `clone_shared` performs before the
         // overflow guard. This inflates refs to 3; the temp-drop inside
         // `ref_count_overflow` will `fetch_sub` it back to 2 before panicking.
         let header = v.header().expect("allocated");

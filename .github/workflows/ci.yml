@@ -6,7 +6,16 @@
 #     `-fuse-ld=wild` rustflags) and the host linker is forced to plain clang
 #     (preinstalled on GitHub's Ubuntu runners).
 #   - rust-toolchain.toml pins a specific nightly; `RUSTUP_TOOLCHAIN` per job
-#     overrides it so the toolchain matrix (MSRV / beta / stable) is real.
+#     overrides it so the toolchain matrix (MSRV / beta / stable) is real
+#     (currently beta only; see the FIXME below).
+#
+# FIXME(1.100 release, ~2026-11-12): rust-version is 1.100 (the first
+# release with a stable `core::alloc::Allocator`), which is still in beta.
+# Stable (1.99) rejects the crate and there is no `1.100.0` toolchain yet, so
+# every job that should run on `stable` or the MSRV runs on `beta` for now.
+# Once 1.100.0 is released, grep for `FIXME(1.100 release` and restore what
+# each comment says: the `['1.100.0', beta, stable]` test matrix and `stable`
+# for the features, clippy, loom and package jobs (and in coverage.yml).
 #
 # Third-party actions are pinned to full commit SHAs (release in the comment).
 name: CI
@@ -45,7 +54,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        rust: ['1.85.0', beta, stable] # 1.85.0 = rust-version in Cargo.toml
+        # FIXME(1.100 release, ~2026-11-12): restore
+        # `['1.100.0', beta, stable]` (1.100.0 = rust-version in Cargo.toml);
+        # until then beta (1.100) stands in for both the MSRV and stable rows.
+        rust: [beta]
     env:
       RUSTUP_TOOLCHAIN: ${{ matrix.rust }} # override rust-toolchain.toml pin
     steps:
@@ -62,14 +74,9 @@ jobs:
         env:
           RUSTFLAGS: -D warnings
         run: cargo check
-      # The MSRV (1.85.0) row verifies the *library* compiles on 1.85 (the step
-      # above) but skips the test suite: it builds dev-dependencies, and one of
-      # them — `bump-scope` (1.4.1, rust-version 1.85.1) — exceeds the library's
-      # declared MSRV, so `cargo test` can't build on 1.85.0. Dev-deps never reach
-      # downstream consumers, so the MSRV promise is unaffected. beta/stable still
-      # run the full suite.
+      # Every row, MSRV included, runs the full suite: all dev-dependencies
+      # (incl. `bump-scope` 3.0, rust-version 1.100.0) build on the MSRV.
       - name: Run test suite
-        if: matrix.rust != '1.85.0'
         run: cargo test
       - name: Check docs
         env:
@@ -86,18 +93,16 @@ jobs:
           - '--no-default-features --features alloc'
           - '--features serde'
           - '--features rkyv'
-          - '--features allocator-api2-v02'
-          - '--features allocator-api2-v03'
-          - '--features serde,rkyv,allocator-api2-v03'
+          - '--features serde,rkyv'
           - '--no-default-features --features alloc,serde'
     env:
-      RUSTUP_TOOLCHAIN: stable
+      RUSTUP_TOOLCHAIN: beta # FIXME(1.100 release, ~2026-11-12): restore stable
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Install stable toolchain
+      - name: Install beta toolchain # FIXME(1.100 release, ~2026-11-12): restore stable
         uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # master
         with:
-          toolchain: stable
+          toolchain: beta # FIXME(1.100 release, ~2026-11-12): restore stable
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           # Cache keys may not contain commas, so key by matrix index.
@@ -128,82 +133,25 @@ jobs:
       - name: cargo doc (as docs.rs builds it)
         env:
           RUSTDOCFLAGS: "--cfg docsrs -D warnings"
-        run: cargo doc --no-deps --features serde,rkyv,allocator-api2-v03
+        run: cargo doc --no-deps --features serde,rkyv
       # Also lint internal (private-item) docs under the docs.rs feature set,
       # catching private-intra-doc-link regressions in feature-gated code.
       - name: cargo doc (internal, docs.rs features)
         env:
           RUSTDOCFLAGS: -D warnings
-        run: cargo doc --no-deps --document-private-items --features serde,rkyv,allocator-api2-v03
-
-  mutual_exclusivity:
-    name: Allocator mutual exclusivity
-    runs-on: ubuntu-latest
-    env:
-      RUSTUP_TOOLCHAIN: stable
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # master
-        with:
-          toolchain: stable
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-      - name: v02 + v03 must fail
-        run: |
-          if cargo check --features 'allocator-api2-v02 allocator-api2-v03' 2>/dev/null; then
-            echo "ERROR: v02+v03 should fail with compile_error!"; exit 1
-          fi
-      - name: v02 + nightly must fail
-        run: |
-          # nightly-allocator-api requires nightly toolchain override; this
-          # check is structural (the compile_error! fires on parse) so stable
-          # is fine.
-          if cargo check --features 'allocator-api2-v02 nightly-allocator-api' 2>/dev/null; then
-            echo "ERROR: v02+nightly should fail"; exit 1
-          fi
-      - name: v03 + nightly must fail
-        run: |
-          if cargo check --features 'allocator-api2-v03 nightly-allocator-api' 2>/dev/null; then
-            echo "ERROR: v03+nightly should fail"; exit 1
-          fi
-
-  nightly_allocator_api:
-    name: nightly-allocator-api
-    runs-on: ubuntu-latest
-    env:
-      RUSTUP_TOOLCHAIN: nightly
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Install nightly toolchain
-        uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # master
-        with:
-          toolchain: nightly
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-      - name: Build (nightly-allocator-api)
-        run: cargo build --features nightly-allocator-api
-      # The test suite's `bump-scope` dev-dependency (1.4.1) does not build
-      # against current nightly's `Allocator` trait, so a failure here is
-      # reported as a warning rather than failing the job; a notice flags when
-      # it starts passing again.
-      - name: Test (nightly-allocator-api)
-        run: |
-          if cargo test --features nightly-allocator-api; then
-            echo "::notice title=nightly-allocator-api::Tests build and pass again; consider making this step blocking."
-          else
-            echo "::warning title=nightly-allocator-api::Tests failed (known: bump-scope dev-dep vs nightly Allocator); library build above passed."
-          fi
+        run: cargo doc --no-deps --document-private-items --features serde,rkyv
 
   clippy:
     name: Clippy
     runs-on: ubuntu-latest
     env:
-      RUSTUP_TOOLCHAIN: stable
+      RUSTUP_TOOLCHAIN: beta # FIXME(1.100 release, ~2026-11-12): restore stable
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Install stable toolchain
+      - name: Install beta toolchain # FIXME(1.100 release, ~2026-11-12): restore stable
         uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # master
         with:
-          toolchain: stable
+          toolchain: beta # FIXME(1.100 release, ~2026-11-12): restore stable
           components: clippy
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       - name: Clippy
@@ -213,13 +161,13 @@ jobs:
     name: Loom
     runs-on: ubuntu-latest
     env:
-      RUSTUP_TOOLCHAIN: stable
+      RUSTUP_TOOLCHAIN: beta # FIXME(1.100 release, ~2026-11-12): restore stable
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Install stable toolchain
+      - name: Install beta toolchain # FIXME(1.100 release, ~2026-11-12): restore stable
         uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # master
         with:
-          toolchain: stable
+          toolchain: beta # FIXME(1.100 release, ~2026-11-12): restore stable
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           workspaces: tools/loom-tests
@@ -301,13 +249,13 @@ jobs:
     name: Package
     runs-on: ubuntu-latest
     env:
-      RUSTUP_TOOLCHAIN: stable
+      RUSTUP_TOOLCHAIN: beta # FIXME(1.100 release, ~2026-11-12): restore stable
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Install stable toolchain
+      - name: Install beta toolchain # FIXME(1.100 release, ~2026-11-12): restore stable
         uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # master
         with:
-          toolchain: stable
+          toolchain: beta # FIXME(1.100 release, ~2026-11-12): restore stable
       # No rust-cache here: its post-job target cleanup chokes on the
       # `target/package/` tree that `cargo package` leaves behind.
       # `cargo package` builds the publishable .crate and verify-compiles it in

@@ -10,7 +10,9 @@ replace `ecow` with `turbocow` in `Cargo.toml` and update the imports from
 
 ### Vectors & Strings
 
-- [`EcoVec<T>`] — compact (2-word) reference-counted clone-on-write vector; same layout as `&[T]`.
+- [`EcoVec<T>`] — compact (2-word) reference-counted clone-on-write vector; same layout as `&[T]`
+  with the default allocator. Generic over a [`core::alloc::Allocator`] (`EcoVec<T, A = Global>`);
+  see [`EcoVec`] for custom allocators.
 - [`EcoString`] — clone-on-write string, 15 bytes inline, spills to `EcoVec<u8>`; fully owns its data.
 - [`EcoStr<'a>`] — lifetime-carrying string; supports a zero-copy *Referenced* (borrowed) storage variant; `EcoString = EcoStr<'static>` (owned).
 - [`EcoBytes`] — clone-on-write byte buffer, 15 bytes inline, spills to `EcoVec<u8>`; supports the zero-copy *Referenced* variant via `from_static`.
@@ -30,7 +32,7 @@ turbocow provides two families, optimised for different workloads:
 [`SmallVec<'a, T, N>`] is an inline-storage vec (N slots on the stack, spills to heap)
 with its own zero-copy Referenced variant.
 
-See the README for feature flags.
+See the README for feature flags; custom allocators need none.
 
 ## Example
 ```
@@ -52,7 +54,6 @@ assert_eq!(third, "Welcome to earth! ");
 */
 
 #![cfg_attr(not(feature = "std"), no_std)]
-#![cfg_attr(feature = "nightly-allocator-api", feature(allocator_api))]
 #![cfg_attr(feature = "nightly-phantom-variance", feature(phantom_variance_markers))]
 // "Available on crate feature X" badges on docs.rs. `feature(doc_auto_cfg)` was
 // removed upstream; the current form is `feature(doc_cfg)` (which gates the
@@ -61,8 +62,6 @@ assert_eq!(third, "Welcome to earth! ");
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![cfg_attr(docsrs, doc(auto_cfg))]
 #![deny(missing_docs)]
-// See https://github.com/tokio-rs/loom/issues/352
-#![allow(unknown_lints, unexpected_cfgs)]
 
 extern crate alloc;
 
@@ -76,7 +75,6 @@ pub mod small_vec;
 pub mod string;
 pub mod vec;
 
-mod allocator;
 mod utils;
 
 pub use self::bytes::EcoBytes;
@@ -88,9 +86,11 @@ pub use self::small_vec::SmallVec;
 pub use self::string::{EcoStr, EcoString, ToEcoString};
 pub use self::vec::{EcoVec, IntoIter};
 
-// Re-export allocator types when features are enabled
-#[cfg(feature = "allocator-api")]
-pub use allocator::Global;
+// The default allocator of `EcoVec<T, A = Global>`, re-exported so
+// `turbocow::Global` names the standard global allocator. (rustdoc does not
+// render doc comments on `no_inline` re-exports.)
+#[doc(no_inline)]
+pub use alloc::alloc::Global;
 
 // Run doctests on the README too
 #[doc = include_str!("../README.md")]

@@ -1,5 +1,7 @@
 [toolchain]
-channel = "nightly-2026-06-14"
+# Must ship the stable `core::alloc::Allocator` (Rust >= 1.100, Cargo.toml's
+# rust-version). Bump the rust-overlay flake input together with this pin.
+channel = "nightly-2026-10-11"
 profile = "minimal"
 components = [
   "cargo",

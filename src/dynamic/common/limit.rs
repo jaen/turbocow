@@ -1,6 +1,6 @@
 use core::mem;
 
-use crate::allocator::Global;
+use crate::Global;
 
 /// Compute the per-allocator inline limit from the allocator's size.
 ///

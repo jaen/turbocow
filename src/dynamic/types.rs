@@ -1,8 +1,9 @@
+use core::alloc::Allocator;
 use core::mem::ManuallyDrop;
 
 use crate::utils::variance::PhantomCovariantLifetime;
 
-use crate::allocator::{AllocatorProvider, Global};
+use crate::Global;
 use crate::vec::types::EcoVec;
 
 use super::common::limit::{LIMIT, TAG_OVERLAPS_LEN};
@@ -22,13 +23,13 @@ pub(crate) struct DynamicVec<'a, const N: usize = LIMIT, A = Global>(
     pub(super) Repr<'a, N, A>,
 )
 where
-    A: AllocatorProvider;
+    A: Allocator;
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct InlineVec<const N: usize = LIMIT, A = Global>
 where
-    A: AllocatorProvider,
+    A: Allocator,
 {
     /// Inline byte buffer.
     pub(super) buf: [u8; N],
@@ -49,7 +50,7 @@ where
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct Referenced<'a, A = Global>
 where
-    A: AllocatorProvider,
+    A: Allocator,
 {
     /// Raw pointer to the borrowed data.
     pub(super) ptr: *const u8,
@@ -62,8 +63,8 @@ where
 }
 
 // Safety: Referenced is just a read-only view + Copy allocator.
-unsafe impl<A: AllocatorProvider + Send> Send for Referenced<'_, A> {}
-unsafe impl<A: AllocatorProvider + Sync> Sync for Referenced<'_, A> {}
+unsafe impl<A: Allocator + Send> Send for Referenced<'_, A> {}
+unsafe impl<A: Allocator + Sync> Sync for Referenced<'_, A> {}
 
 /// The internal representation.
 ///
@@ -79,7 +80,7 @@ unsafe impl<A: AllocatorProvider + Sync> Sync for Referenced<'_, A> {}
 #[repr(C)]
 pub(super) union Repr<'a, const N: usize, A>
 where
-    A: AllocatorProvider,
+    A: Allocator,
 {
     pub(super) referenced: ManuallyDrop<Referenced<'a, A>>,
     pub(super) inline: ManuallyDrop<InlineVec<N, A>>,
@@ -149,7 +150,7 @@ const _: () = {
 #[derive(Debug)]
 pub(super) enum Variant<'a, 'v, const N: usize, A>
 where
-    A: AllocatorProvider,
+    A: Allocator,
 {
     Referenced(&'v Referenced<'a, A>),
     Inline(&'v InlineVec<N, A>),
@@ -160,7 +161,7 @@ where
 #[derive(Debug)]
 pub(super) enum VariantMut<'a, 'v, const N: usize, A>
 where
-    A: AllocatorProvider,
+    A: Allocator,
 {
     Referenced(&'v mut Referenced<'a, A>),
     Inline(&'v mut InlineVec<N, A>),

@@ -1,7 +1,8 @@
+use alloc::alloc::handle_alloc_error;
+use core::alloc::Allocator;
 use core::mem;
 use core::ptr::{self, NonNull};
 
-use crate::allocator::AllocatorProvider;
 use crate::sync::atomic::AtomicUsize;
 
 use super::capacity_overflow;
@@ -9,14 +10,8 @@ use crate::vec::types::{EcoVec, Header};
 
 impl<T, A> EcoVec<T, A>
 where
-    A: AllocatorProvider,
+    A: Allocator,
 {
-    #[allow(unused)]
-    #[inline(always)]
-    pub(crate) fn get_allocator(&self) -> &A {
-        &self.alloc
-    }
-
     /// Grow the capacity to at least the `target` size.
     ///
     /// May only be called if:
@@ -46,36 +41,39 @@ where
 
         let layout = Self::layout(target);
 
-        let allocation = if !self.is_allocated() {
+        let result = if !self.is_allocated() {
             // Allocate new memory using the allocator
-            match self.alloc.allocate(layout) {
-                Ok(ptr) => ptr.as_ptr().cast::<u8>(),
-                Err(_) => ptr::null_mut(),
-            }
+            self.alloc.allocate(layout)
         } else {
             // Grow existing allocation
             let old_layout = Self::layout(self.capacity());
             // Safety:
             // `is_allocated()` is true, so `allocation_mut` is valid, and the
             // resulting pointer is non-null (it points to the backing
-            // allocation). `old_layout` is the layout the block was allocated
-            // with, satisfying `AllocatorProvider::grow`'s contract.
+            // allocation). The block is currently allocated by `self.alloc`,
+            // or by an equivalent clone of it if the buffer was shared (only
+            // such allocators make `EcoVec` `Clone`; see `clone_shared`),
+            // with `old_layout` (the header records the capacity it was
+            // requested with, not the possibly larger size the allocator
+            // returned, so the layout fits), and `layout` has the same
+            // alignment and a larger size, satisfying `Allocator::grow`'s
+            // contract.
             let old_ptr = unsafe { self.allocation_mut() };
-            match unsafe {
+            unsafe {
                 self.alloc.grow(NonNull::new_unchecked(old_ptr), old_layout, layout)
-            } {
-                Ok(ptr) => ptr.as_ptr().cast::<u8>(),
-                Err(_) => ptr::null_mut(),
             }
         };
-        if allocation.is_null() {
-            self.alloc.handle_alloc_error(layout);
-        }
+        let allocation = match result {
+            Ok(ptr) => ptr.as_ptr().cast::<u8>(),
+            // Like `Vec`, defer to the global alloc-error handler (which aborts
+            // by default under `std`).
+            Err(_) => handle_alloc_error(layout),
+        };
 
         // Construct data pointer by offsetting.
         //
         // Safety:
-        // Just checked for null and adding only increases the size. Can't
+        // The allocation is non-null and adding only increases the size. Can't
         // overflow because the `allocation` is a valid pointer to
         // `Self::size(target)` bytes and `Self::offset() < Self::size(target)`.
         self.ptr =

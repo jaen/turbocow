@@ -5,10 +5,11 @@
 Workflows live in `.github/workflows/`:
 
 - `ci.yml` — on every push / PR, weekly, and on demand: fmt + check + tests on
-  the MSRV (1.85.0, library only) / beta / stable matrix, the feature matrix,
-  docs.rs-equivalent docs, allocator-feature mutual exclusivity,
-  `nightly-allocator-api`, clippy, loom, Miri (x86_64, aarch64, sparc64 BE,
-  i686), and `cargo package`.
+  the MSRV (1.100.0) / beta / stable matrix, the feature matrix,
+  docs.rs-equivalent docs, clippy, loom, Miri (x86_64, aarch64, sparc64 BE,
+  i686), and `cargo package`. Until Rust 1.100.0 is released, the MSRV and
+  stable jobs run on beta (`FIXME(1.100 release, ~2026-11-12)` in the
+  workflows).
 - `coverage.yml` — `cargo llvm-cov` per feature set; `lcov.info` is uploaded as
   a workflow artifact. To publish to Codecov, add a `CODECOV_TOKEN` repository
   secret and uncomment the upload step.
@@ -50,6 +51,12 @@ Beyond the unit/integration tests:
 4. Tag the release: `git tag v<version> && git push origin v<version>`.
 5. `cargo publish`.
 
-The MSRV (1.85) should be verified against a real toolchain before publishing,
-e.g. `RUSTUP_TOOLCHAIN=1.85.0 cargo +1.85.0 check` — the pinned nightly in
-`rust-toolchain.toml` otherwise masks MSRV regressions locally.
+The MSRV (1.100) should be verified against a real toolchain before publishing,
+e.g. `RUSTUP_TOOLCHAIN=1.100.0 cargo +1.100.0 test` — the pinned nightly in
+`rust-toolchain.toml` otherwise masks MSRV regressions locally. Don't publish
+before 1.100.0 is stable: until then no stable toolchain can build turbocow.
+
+`bump-scope` is a git dev-dependency until 3.0.0 is on crates.io. `cargo
+package` drops version-less dev-dependencies, so publishing works regardless,
+but switch it to `bump-scope = "3"` once released (`FIXME(bump-scope-3)` in
+`Cargo.toml`).

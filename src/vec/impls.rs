@@ -1,4 +1,5 @@
 use alloc::vec::Vec;
+use core::alloc::Allocator;
 use core::borrow::Borrow;
 use core::cmp::Ordering;
 use core::hash::{Hash, Hasher};
@@ -6,13 +7,13 @@ use core::ops::Deref;
 use core::ptr;
 
 use super::types::EcoVec;
-use crate::allocator::{AllocatorProvider, Global};
+use crate::Global;
 
 // ── Access ──────────────────────────────────────────────────────────────
 
 impl<T, A> Deref for EcoVec<T, A>
 where
-    A: AllocatorProvider,
+    A: Allocator,
 {
     type Target = [T];
 
@@ -24,7 +25,7 @@ where
 
 impl<T, A> Borrow<[T]> for EcoVec<T, A>
 where
-    A: AllocatorProvider,
+    A: Allocator,
 {
     #[inline]
     fn borrow(&self) -> &[T] {
@@ -34,7 +35,7 @@ where
 
 impl<T, A> AsRef<[T]> for EcoVec<T, A>
 where
-    A: AllocatorProvider,
+    A: Allocator,
 {
     #[inline]
     fn as_ref(&self) -> &[T] {
@@ -47,7 +48,7 @@ where
 impl<T, A> Hash for EcoVec<T, A>
 where
     T: Hash,
-    A: AllocatorProvider,
+    A: Allocator,
 {
     #[inline]
     fn hash<H: Hasher>(&self, state: &mut H) {
@@ -58,14 +59,14 @@ where
 impl<T, A> Eq for EcoVec<T, A>
 where
     T: Eq,
-    A: AllocatorProvider,
+    A: Allocator,
 {
 }
 
 impl<T, A> PartialEq for EcoVec<T, A>
 where
     T: PartialEq,
-    A: AllocatorProvider,
+    A: Allocator,
 {
     #[inline]
     fn eq(&self, other: &Self) -> bool {
@@ -79,7 +80,7 @@ where
 impl<T, A> PartialEq<[T]> for EcoVec<T, A>
 where
     T: PartialEq,
-    A: AllocatorProvider,
+    A: Allocator,
 {
     #[inline]
     fn eq(&self, other: &[T]) -> bool {
@@ -90,7 +91,7 @@ where
 impl<T, A> PartialEq<&[T]> for EcoVec<T, A>
 where
     T: PartialEq,
-    A: AllocatorProvider,
+    A: Allocator,
 {
     #[inline]
     fn eq(&self, other: &&[T]) -> bool {
@@ -101,7 +102,7 @@ where
 impl<T, A, const N: usize> PartialEq<[T; N]> for EcoVec<T, A>
 where
     T: PartialEq,
-    A: AllocatorProvider,
+    A: Allocator,
 {
     #[inline]
     fn eq(&self, other: &[T; N]) -> bool {
@@ -112,7 +113,7 @@ where
 impl<T, A, const N: usize> PartialEq<&[T; N]> for EcoVec<T, A>
 where
     T: PartialEq,
-    A: AllocatorProvider,
+    A: Allocator,
 {
     #[inline]
     fn eq(&self, other: &&[T; N]) -> bool {
@@ -123,7 +124,7 @@ where
 impl<T, A> PartialEq<EcoVec<T, A>> for [T]
 where
     T: PartialEq,
-    A: AllocatorProvider,
+    A: Allocator,
 {
     #[inline]
     fn eq(&self, other: &EcoVec<T, A>) -> bool {
@@ -134,7 +135,7 @@ where
 impl<T, A, const N: usize> PartialEq<EcoVec<T, A>> for [T; N]
 where
     T: PartialEq,
-    A: AllocatorProvider,
+    A: Allocator,
 {
     #[inline]
     fn eq(&self, other: &EcoVec<T, A>) -> bool {
@@ -145,7 +146,7 @@ where
 impl<T, A> PartialEq<Vec<T>> for EcoVec<T, A>
 where
     T: PartialEq,
-    A: AllocatorProvider,
+    A: Allocator,
 {
     #[inline]
     fn eq(&self, other: &Vec<T>) -> bool {
@@ -156,7 +157,7 @@ where
 impl<T, A> PartialEq<EcoVec<T, A>> for Vec<T>
 where
     T: PartialEq,
-    A: AllocatorProvider,
+    A: Allocator,
 {
     #[inline]
     fn eq(&self, other: &EcoVec<T, A>) -> bool {
@@ -167,7 +168,7 @@ where
 impl<T, A> Ord for EcoVec<T, A>
 where
     T: Ord,
-    A: AllocatorProvider,
+    A: Allocator,
 {
     #[inline]
     fn cmp(&self, other: &Self) -> Ordering {
@@ -178,7 +179,7 @@ where
 impl<T, A> PartialOrd for EcoVec<T, A>
 where
     T: PartialOrd,
-    A: AllocatorProvider,
+    A: Allocator,
 {
     #[inline]
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
@@ -256,7 +257,7 @@ where
 impl<T, A, const N: usize> TryFrom<EcoVec<T, A>> for [T; N]
 where
     T: Clone,
-    A: AllocatorProvider,
+    A: Allocator,
 {
     type Error = EcoVec<T, A>;
 
@@ -283,7 +284,7 @@ where
 impl<T, A> Extend<T> for EcoVec<T, A>
 where
     T: Clone,
-    A: AllocatorProvider + Clone,
+    A: Allocator + Clone,
 {
     fn extend<I>(&mut self, iter: I)
     where
@@ -326,7 +327,7 @@ where
 
 impl<'a, T, A> IntoIterator for &'a EcoVec<T, A>
 where
-    A: AllocatorProvider,
+    A: Allocator,
 {
     type IntoIter = core::slice::Iter<'a, T>;
     type Item = &'a T;
@@ -340,7 +341,7 @@ where
 impl<T, A> IntoIterator for EcoVec<T, A>
 where
     T: Clone,
-    A: AllocatorProvider,
+    A: Allocator,
 {
     type IntoIter = IntoIter<T, A>;
     type Item = T;
@@ -356,7 +357,7 @@ where
     }
 }
 
-/// An owned iterator over an [`EcoVec`](crate::EcoVec).
+/// An owned iterator over an [`EcoVec`].
 ///
 /// If the vector had a reference count of 1, this moves out of the vector,
 /// otherwise it lazily clones.
@@ -366,7 +367,7 @@ where
 /// matching ecow's single-parameter `ecow::vec::IntoIter<T>`.
 pub struct IntoIter<T, A = Global>
 where
-    A: AllocatorProvider,
+    A: Allocator,
 {
     vec: EcoVec<T, A>,
     unique: bool,
@@ -376,7 +377,7 @@ where
 
 impl<T, A> IntoIter<T, A>
 where
-    A: AllocatorProvider,
+    A: Allocator,
 {
     /// Returns the remaining items of this iterator as a slice.
     #[inline]
@@ -393,7 +394,7 @@ where
 impl<T, A> Iterator for IntoIter<T, A>
 where
     T: Clone,
-    A: AllocatorProvider,
+    A: Allocator,
 {
     type Item = T;
 
@@ -425,7 +426,7 @@ where
 impl<T, A> DoubleEndedIterator for IntoIter<T, A>
 where
     T: Clone,
-    A: AllocatorProvider,
+    A: Allocator,
 {
     #[inline]
     fn next_back(&mut self) -> Option<Self::Item> {
@@ -443,13 +444,13 @@ where
 impl<T, A> ExactSizeIterator for IntoIter<T, A>
 where
     T: Clone,
-    A: AllocatorProvider,
+    A: Allocator,
 {
 }
 
 impl<T, A> Drop for IntoIter<T, A>
 where
-    A: AllocatorProvider,
+    A: Allocator,
 {
     fn drop(&mut self) {
         if !self.unique || !self.vec.is_allocated() {
@@ -473,7 +474,7 @@ where
 impl<T, A> core::fmt::Debug for IntoIter<T, A>
 where
     T: core::fmt::Debug,
-    A: AllocatorProvider,
+    A: Allocator,
 {
     #[inline]
     fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {

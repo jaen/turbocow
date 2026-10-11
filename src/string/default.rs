@@ -11,7 +11,7 @@ use core::hash::{Hash, Hasher};
 use core::ops::{Add, AddAssign, Deref};
 use core::str::FromStr;
 
-use crate::allocator::Global;
+use crate::Global;
 use crate::dynamic::{DynamicVec, InlineVec, LIMIT};
 
 /// Create a new [`EcoString`] from a format string.

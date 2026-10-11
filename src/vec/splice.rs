@@ -16,11 +16,12 @@
 
 extern crate alloc;
 
+use core::alloc::Allocator;
 use core::fmt;
 use core::ptr;
 use core::slice;
 
-use crate::allocator::{AllocatorProvider, Global};
+use crate::Global;
 use crate::vec::drain::Drain;
 use crate::vec::types::EcoVec;
 
@@ -32,7 +33,7 @@ use crate::vec::types::EcoVec;
 /// The final type parameter defaults to `Global` so that
 /// `turbocow::vec::Splice<'_, I>` resolves without an explicit allocator,
 /// matching ecow's two-parameter `ecow::vec::Splice<'_, I>`.
-pub struct Splice<'a, I: Iterator + 'a, A: AllocatorProvider + Clone = Global>
+pub struct Splice<'a, I: Iterator + 'a, A: Allocator + Clone = Global>
 where
     // The `Clone` bound on `I::Item` is required here because the `Drop`
     // implementation calls `EcoVec` methods (`reserve`/`grow`) that require it,
@@ -50,7 +51,7 @@ impl<I, A> fmt::Debug for Splice<'_, I, A>
 where
     I: Iterator + fmt::Debug,
     I::Item: Clone + fmt::Debug,
-    A: AllocatorProvider + Clone,
+    A: Allocator + Clone,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Splice")
@@ -60,7 +61,7 @@ where
     }
 }
 
-impl<I: Iterator, A: AllocatorProvider + Clone> Iterator for Splice<'_, I, A>
+impl<I: Iterator, A: Allocator + Clone> Iterator for Splice<'_, I, A>
 where
     I::Item: Clone,
 {
@@ -77,7 +78,7 @@ where
     }
 }
 
-impl<I: Iterator, A: AllocatorProvider + Clone> DoubleEndedIterator for Splice<'_, I, A>
+impl<I: Iterator, A: Allocator + Clone> DoubleEndedIterator for Splice<'_, I, A>
 where
     I::Item: Clone,
 {
@@ -87,7 +88,7 @@ where
     }
 }
 
-impl<I: Iterator, A: AllocatorProvider + Clone> ExactSizeIterator for Splice<'_, I, A> where
+impl<I: Iterator, A: Allocator + Clone> ExactSizeIterator for Splice<'_, I, A> where
     I::Item: Clone
 {
 }
@@ -95,7 +96,7 @@ impl<I: Iterator, A: AllocatorProvider + Clone> ExactSizeIterator for Splice<'_,
 impl<I: Iterator, A> Drop for Splice<'_, I, A>
 where
     I::Item: Clone,
-    A: AllocatorProvider + Clone,
+    A: Allocator + Clone,
 {
     fn drop(&mut self) {
         // Drop (or finish yielding) any not-yet-yielded removed elements first.
@@ -153,7 +154,7 @@ where
 }
 
 /// Private helper methods for `Splice::drop`.
-impl<T: Clone, A: AllocatorProvider + Clone> Drain<'_, T, A> {
+impl<T: Clone, A: Allocator + Clone> Drain<'_, T, A> {
     /// The range from `self.vec.len` to `self.tail_start` contains elements
     /// that have been moved out (the hole).
     ///
@@ -248,7 +249,7 @@ impl<T: Clone, A: AllocatorProvider + Clone> Drain<'_, T, A> {
 impl<T, A> EcoVec<T, A>
 where
     T: Clone,
-    A: AllocatorProvider + Clone,
+    A: Allocator + Clone,
 {
     /// Creates a splicing iterator that replaces the specified range in the
     /// vector with the given `replace_with` iterator and yields the removed

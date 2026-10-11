@@ -321,7 +321,7 @@ impl VecLike for EcoVec<u32> {
     }
     fn retain_even(&mut self) {
         // EcoVec::retain hands out `&mut T`.
-        EcoVec::retain(self, |x: &mut u32| *x % 2 == 0)
+        EcoVec::retain(self, |x: &mut u32| x.is_multiple_of(2))
     }
     fn retain_none(&mut self) {
         EcoVec::retain(self, |_: &mut u32| false)

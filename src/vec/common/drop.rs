@@ -1,18 +1,15 @@
-//! Allocator-aware implementation of EcoVec
-//!
-//! This module contains the implementation of EcoVec when allocator features are enabled.
-//! It's kept in a separate file to maintain clarity and avoid excessive conditional compilation.
+//! The [`Drop`] impl of [`EcoVec`], which frees the backing allocation with the
+//! vector's allocator once the last reference is gone.
 
-use core::alloc::Layout;
+use core::alloc::{Allocator, Layout};
 use core::ptr::{self, NonNull};
 
-use crate::allocator::AllocatorProvider;
 use crate::sync::atomic::{self, Ordering::*};
 use crate::vec::types::EcoVec;
 
 impl<T, A> Drop for EcoVec<T, A>
 where
-    A: AllocatorProvider,
+    A: Allocator,
 {
     fn drop(&mut self) {
         // Decide whether this is the last reference to the backing allocation.
@@ -55,13 +52,13 @@ where
 
         // Ensures that the backing storage is deallocated even if one of the
         // element drops panics.
-        struct DeallocGuard<'a, A: AllocatorProvider> {
+        struct DeallocGuard<'a, A: Allocator> {
             alloc: &'a A,
             ptr: NonNull<u8>,
             layout: Layout,
         }
 
-        impl<A: AllocatorProvider> Drop for DeallocGuard<'_, A> {
+        impl<A: Allocator> Drop for DeallocGuard<'_, A> {
             fn drop(&mut self) {
                 unsafe { self.alloc.deallocate(self.ptr, self.layout) };
             }

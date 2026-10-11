@@ -32,16 +32,16 @@ jobs:
         features:
           - '' # default (std + alloc)
           - '--features serde,rkyv'
-          - '--features allocator-api2-v03'
           - '--no-default-features --features alloc,serde'
     env:
-      RUSTUP_TOOLCHAIN: stable
+      # Stable 1.99 rejects turbocow's rust-version (1.100); see ci.yml.
+      RUSTUP_TOOLCHAIN: beta # FIXME(1.100 release, ~2026-11-12): restore stable
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Install stable toolchain
+      - name: Install beta toolchain # FIXME(1.100 release, ~2026-11-12): restore stable
         uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # master
         with:
-          toolchain: stable
+          toolchain: beta # FIXME(1.100 release, ~2026-11-12): restore stable
           components: llvm-tools-preview
       - name: Install cargo-llvm-cov
         uses: taiki-e/install-action@9983c65e42da123ff25d1f78505eb6de315aa172 # v2.87.20

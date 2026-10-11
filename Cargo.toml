@@ -1,7 +1,8 @@
 [package]
 name = "turbocow"
 version = "0.3.1-beta.1"
-rust-version = "1.85"
+# 1.100 is the first release with a stable `core::alloc::Allocator`.
+rust-version = "1.100"
 authors = ["jaen <hi@jaen.me>"]
 edition = "2024"
 description = "Compact, clone-on-write vectors, strings, maps and sets with inline + referenced storage — a superset of ecow."
@@ -39,11 +40,6 @@ exclude = [
 [dependencies]
 serde = { version = "1.0", optional = true, default-features = false }
 
-# Allocator API dependencies (Phase 1-3)
-# Using package renaming to support multiple versions simultaneously
-allocator-api2-02 = { package = "allocator-api2", version = "0.2.21", optional = true, default-features = false }
-allocator-api2-03 = { package = "allocator-api2", version = "0.3.1", optional = true, default-features = false }
-
 hashbrown = { version = "0.15", default-features = false, features = [
   "default-hasher",
   "inline-more",
@@ -53,8 +49,6 @@ rkyv = { version = "0.8", optional = true, default-features = false, features = 
 ] }
 
 # loom: cfg-gated dependency — see [target.'cfg(loom)'.dependencies] below.
-
-bump-scope = { version = "1.3.0", optional = true }
 
 [dev-dependencies]
 # Serialization testing
@@ -68,8 +62,13 @@ rkyv = { version = "0.8", features = ["alloc", "bytecheck"] }
 # so they don't compile during `cargo test` / `cargo clippy --all-targets`.
 ecow = "0.3.1"
 
-# For allocator integration testing
-bump-scope = { version = "1.3.0" }
+# For allocator integration testing: bump-scope 3.0 implements the (now
+# stable) `core::alloc::Allocator`.
+# FIXME(bump-scope-3): 3.0.0 is not on crates.io yet; switch to
+# `bump-scope = "3"` once it is. `cargo package` drops version-less
+# dev-dependencies from the published manifest, so this git dep never reaches
+# crates.io.
+bump-scope = { git = "https://github.com/bluurryy/bump-scope", rev = "4f7fec065a3250d800f50bea5a3adb0b4b1a06e5" }
 
 # Property-based + differential testing. `arbitrary` drives both the proptest
 # harness (random bytes → Unstructured) and the cargo-fuzz targets, so the op
@@ -121,6 +120,12 @@ strip = false
 [target.'cfg(loom)'.dependencies]
 loom = "0.7.2"
 
+[lints.rust]
+# Declare the `--cfg loom` used above (see tokio-rs/loom#352) and the
+# `--cfg hotpath` described below instead of allowing `unexpected_cfgs`
+# crate-wide, so stray `cfg`s still warn.
+unexpected_cfgs = { level = "warn", check-cfg = ["cfg(loom)", "cfg(hotpath)"] }
+
 # hotpath: a cfg-gated PROFILING dependency, same pattern as loom above — pulled in
 # ONLY when building with `--cfg hotpath`, never fetched/compiled in CI or by consumers,
 # and (being a cfg dep, not a Cargo feature) absent from turbocow's public feature set.
@@ -139,30 +144,11 @@ hotpath = { version = "0.17", default-features = false, features = ["hotpath"] }
 
 [features]
 default = ["std", "alloc"]
-std = ["alloc", "allocator-api2-02?/std", "allocator-api2-03?/std"]
-# nightly = ["nightly-allocator-api"]
+std = ["alloc"]
 
-# Allocator API support - disabled by default for Phase 0
-# Phase 1-3: Foundation features
-
-## Adds `Global` as the default base allocator and interactions with `alloc` collections
-alloc = ["allocator-api2-02?/alloc", "allocator-api2-03?/alloc"]
-
-## Makes turbocow compatible with allocator_api2 version 0.2
-allocator-api2-v02 = [
-  "dep:allocator-api2-02",
-  "bump-scope?/allocator-api2-02",
-  "allocator-api",
-  "allocator-api-shim",
-]
-
-## Makes turbocow compatible with allocator_api2 version 0.3
-allocator-api2-v03 = [
-  "dep:allocator-api2-03",
-  "bump-scope?/allocator-api2-03",
-  "allocator-api",
-  "allocator-api-shim",
-]
+## Core heap support. Custom allocators (`core::alloc::Allocator`) need no
+## feature: `EcoVec<T, A = Global>` is always allocator-generic.
+alloc = []
 
 # Use stdlib PhantomCovariantLifetime instead of polyfill
 nightly-phantom-variance = []
@@ -170,27 +156,14 @@ nightly-phantom-variance = []
 # Enable fmt::Arguments::as_str() fast-path in eco_format! (stable since Rust 1.82)
 nightly-fmt = []
 
-# Makes turbocow compatible with nightly Allocator API
-nightly-allocator-api = [
-  "bump-scope?/nightly-allocator-api",
-  "allocator-api2-02?/nightly",
-  "allocator-api",
-]
-
-# Any allocator support
-allocator-api = []
-
-# Allocator support via any of the shims
-allocator-api-shim = []
-
 # `loom` is intentionally NOT a feature — it is a cfg-gated dependency (see
 # [target.'cfg(loom)'.dependencies]) so a downstream loom model-check that sets
 # only RUSTFLAGS="--cfg loom" pulls it in automatically.
 rkyv = ["dep:rkyv"]
 
 [package.metadata.docs.rs]
-# Document the stable public API: default (std+alloc) + serde + rkyv + the
-# stable custom-allocator support (allocator-api2-v03). nightly-allocator-api
-# is omitted because it requires a nightly toolchain.
-features = ["serde", "rkyv", "allocator-api2-v03"]
+# Document the stable public API: default (std+alloc) + serde + rkyv. Custom
+# allocator support (`core::alloc::Allocator`) is always on; the nightly-*
+# features are omitted because they only switch internals and add no API.
+features = ["serde", "rkyv"]
 rustdoc-args = ["--cfg", "docsrs"]

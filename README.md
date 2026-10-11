@@ -29,7 +29,7 @@ cargo add turbocow
 
 | Type | Description |
 |:-----|:------------|
-| [`EcoVec<T>`][ecov-docs] | Compact (2-word) reference-counted clone-on-write vector; same memory layout as `&[T]`. O(1) clone. |
+| [`EcoVec<T>`][ecov-docs] | Compact (2-word) reference-counted clone-on-write vector; same memory layout as `&[T]` with the default allocator. O(1) clone. Generic over a [custom allocator](#custom-allocators) (`EcoVec<T, A = Global>`). |
 | [`EcoString`][ecos-docs] | Clone-on-write string, 15 bytes inline, spills to `EcoVec<u8>`. Strict superset of ecow 0.3.1's `EcoString` (adds `insert`/`insert_str`/`remove`, `ToEcoString`, `AsRef<OsStr/Path>`, `Deref<Target=str>`). |
 | [`EcoStr<'a>`][ecostr-docs] | Lifetime-carrying string; supports a zero-copy *Referenced* (borrowed) storage variant. `EcoString` is `EcoStr<'static>` (owned). |
 | [`EcoBytes`][ecobs-docs] | Clone-on-write byte buffer, 15 bytes inline, spills to `EcoVec<u8>`. Strict superset of ecow 0.3.1's `EcoBytes` (adds zero-copy `from_static`, `into_eco_string_lossy`, concatenating `FromIterator`/`Extend`). |
@@ -87,26 +87,38 @@ assert_eq!(third, "Welcome to earth! ");
 
 | Feature | Default | Description |
 |:--------|:-------:|:------------|
-| `std` | yes | Enables std integration: `io::Write` for `EcoVec<u8>`, `AsRef<OsStr>` / `AsRef<Path>` for `EcoString`. Implies `alloc`. |
+| `std` | yes | Enables std integration: `io::Write` for `EcoVec<u8>`, `AsRef<OsStr>` / `AsRef<Path>` for `EcoString`, `Clone` for `EcoVec<T, System>`. Implies `alloc`. |
 | `alloc` | yes | Core heap support (required; turbocow is a heap-collections crate). Disable `std` but keep `alloc` for no_std builds. |
 | `serde` | no | `Serialize`/`Deserialize` for all collection types. |
 | `rkyv` | no | rkyv 0.8 `Archive`/`Serialize`/`Deserialize` for `EcoVec`, `EcoString`, `EcoBytes`. |
-| `allocator-api2-v02` | no | Custom-allocator support via the [`allocator-api2`](https://crates.io/crates/allocator-api2) 0.2 shim (stable). |
-| `allocator-api2-v03` | no | Custom-allocator support via the [`allocator-api2`](https://crates.io/crates/allocator-api2) 0.3 shim (stable). |
-| `nightly-allocator-api` | no | Custom-allocator support via the real nightly `allocator_api` feature. See caveat below. |
 | `nightly-fmt` | no | Enables the `fmt::Arguments::as_str()` fast-path in `eco_format!`. |
 | `nightly-phantom-variance` | no | Uses `PhantomCovariantLifetime` from stdlib instead of a polyfill. |
 | `loom` | no | Enables [loom](https://crates.io/crates/loom) concurrency testing mode. |
 
-> **Allocator feature notes:** the stable `allocator-api2-v02` and
-> `allocator-api2-v03` shims are the supported way to plug in a custom
-> allocator and build on stable Rust. `nightly-allocator-api` requires a
-> nightly toolchain; the library itself compiles with it, but turbocow's own
-> integration tests (which use `bump-scope` as a dev-dependency) currently fail
-> on recent nightlies due to an upstream `bump-scope` vs `core::alloc::Allocator`
-> trait conflict — a dev-only issue that does not affect consumers. The
-> `nightly-allocator-api` and `allocator-api2-*` backends are mutually
-> exclusive; enabling them together (e.g. via `--all-features`) is unsupported.
+### Custom allocators
+
+`EcoVec<T, A = Global>` is generic over the standard
+[`core::alloc::Allocator`](https://doc.rust-lang.org/core/alloc/trait.Allocator.html)
+trait (stable since Rust 1.100); no feature flag is needed. Pass an allocator to
+the `*_in` constructors or to `eco_vec![in alloc; ..]`. Since `&A` is an
+allocator too, arenas such as [`bump-scope`](https://crates.io/crates/bump-scope)'s
+`Bump` (3.0+, not yet released) can be used by reference. The other types
+always use `Global`.
+
+Cloning an `EcoVec` shares its buffer, and the last clone dropped frees it with
+its own copy of the allocator. So `EcoVec<T, A>` is `Clone` only for allocators
+whose clones are known to be interchangeable: `Global`, `System` (with the
+`std` feature), and `&A`, `Rc<A>` or `Arc<A>` for any allocator `A`. Other
+allocators can still be used by value for vectors that are never cloned.
+
+```rust
+use std::alloc::System;
+use turbocow::{EcoVec, eco_vec};
+
+let mut vec = EcoVec::new_in(System);
+vec.extend_from_slice(&[1, 2, 3]);
+assert_eq!(vec.as_slice(), eco_vec![in System; 1, 2, 3].as_slice());
+```
 
 ### no_std
 
@@ -121,9 +133,11 @@ turbocow = { version = "0.3", default-features = false, features = ["alloc"] }
 
 ### MSRV
 
-turbocow requires **Rust 1.85** (edition 2024). This is intentionally higher
-than ecow's MSRV of 1.73; the "strict superset of ecow 0.3.1" guarantee
-applies to the **public API**, not to MSRV compatibility.
+turbocow requires **Rust 1.100** (edition 2024), the first release with a
+stable `core::alloc::Allocator`; until 1.100.0 is released (scheduled for
+2026-11-12) that means the beta toolchain. This is intentionally higher than
+ecow's MSRV of 1.73; the "strict superset of ecow 0.3.1" guarantee applies to
+the **public API**, not to MSRV compatibility.
 
 ## FAQ
 

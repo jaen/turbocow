@@ -1,12 +1,16 @@
+use core::alloc::Allocator;
 use core::ptr;
 
-use crate::allocator::AllocatorProvider;
 use crate::dynamic::common::limit::LEN_VALUE_MASK_USIZE;
 use crate::dynamic::types::DynamicVec;
+use crate::vec::types::EcoVec;
 
 impl<'a, const N: usize, A> Clone for DynamicVec<'a, N, A>
 where
-    A: AllocatorProvider + Clone,
+    A: Allocator + Clone,
+    // The Spilled variant shares its `EcoVec`, which is only `Clone` for
+    // allocators whose clones are interchangeable.
+    EcoVec<u8, A>: Clone,
 {
     #[inline]
     fn clone(&self) -> Self {
@@ -30,7 +34,7 @@ where
 
 impl<const N: usize, A> Drop for DynamicVec<'_, N, A>
 where
-    A: AllocatorProvider,
+    A: Allocator,
 {
     #[inline]
     fn drop(&mut self) {
@@ -68,7 +72,7 @@ where
 
 impl<const N: usize, A> PartialEq for DynamicVec<'_, N, A>
 where
-    A: AllocatorProvider,
+    A: Allocator,
 {
     #[inline]
     fn eq(&self, other: &Self) -> bool {
@@ -93,11 +97,11 @@ where
     }
 }
 
-impl<const N: usize, A> Eq for DynamicVec<'_, N, A> where A: AllocatorProvider {}
+impl<const N: usize, A> Eq for DynamicVec<'_, N, A> where A: Allocator {}
 
 impl<const N: usize, A> core::fmt::Debug for DynamicVec<'_, N, A>
 where
-    A: AllocatorProvider,
+    A: Allocator,
 {
     fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
         f.debug_struct("DynamicVec")
@@ -112,69 +116,67 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::allocator::alloc::Layout;
-    use crate::allocator::{AllocError, AllocatorProvider, Global};
+    use crate::Global;
     use crate::dynamic::common::limit::LIMIT;
     use crate::dynamic::types::InlineVec;
+    use core::alloc::{AllocError, Layout};
     use core::ptr::NonNull;
     use core::sync::atomic::{AtomicUsize, Ordering};
 
-    static DROP_COUNT: AtomicUsize = AtomicUsize::new(0);
+    /// One drop counter per test (indexed by `CountingAlloc`'s first byte),
+    /// so the tests stay independent when they run in parallel.
+    static DROP_COUNTS: [AtomicUsize; 3] = [const { AtomicUsize::new(0) }; 3];
 
     /// Non-ZST allocator with a Drop impl that counts. Functionally
-    /// identical to Global (delegates all AllocatorProvider methods) except
-    /// it occupies 8 bytes and runs Drop — so we can verify DynamicVec::drop
-    /// actually drops the allocator field for Inline/Referenced variants.
+    /// identical to Global (delegates to it; `grow`/`shrink` use the trait's
+    /// default allocate-copy-deallocate) except it occupies 8 bytes and runs
+    /// Drop — so we can verify DynamicVec::drop drops the allocator field
+    /// exactly once for every variant.
     #[derive(Clone)]
     struct CountingAlloc {
-        _marker: [u8; 8], // forces non-ZST
+        // Forces non-ZST. Byte 0 selects the counter; the rest stays zero
+        // (on big-endian the union's tag byte can overlap the last one).
+        marker: [u8; 8],
     }
 
-    unsafe impl AllocatorProvider for CountingAlloc {
+    impl CountingAlloc {
+        fn new(counter: usize) -> Self {
+            let mut marker = [0; 8];
+            marker[0] = counter as u8;
+            Self { marker }
+        }
+
+        fn drops(counter: usize) -> usize {
+            DROP_COUNTS[counter].load(Ordering::SeqCst)
+        }
+    }
+
+    unsafe impl Allocator for CountingAlloc {
         fn allocate(&self, layout: Layout) -> Result<NonNull<[u8]>, AllocError> {
             Global.allocate(layout)
         }
         unsafe fn deallocate(&self, ptr: NonNull<u8>, layout: Layout) {
             unsafe { Global.deallocate(ptr, layout) }
         }
-        unsafe fn grow(
-            &self,
-            ptr: NonNull<u8>,
-            old: Layout,
-            new: Layout,
-        ) -> Result<NonNull<[u8]>, AllocError> {
-            unsafe { Global.grow(ptr, old, new) }
-        }
-        unsafe fn shrink(
-            &self,
-            ptr: NonNull<u8>,
-            old: Layout,
-            new: Layout,
-        ) -> Result<NonNull<[u8]>, AllocError> {
-            unsafe { Global.shrink(ptr, old, new) }
-        }
     }
 
     impl Drop for CountingAlloc {
         fn drop(&mut self) {
-            DROP_COUNT.fetch_add(1, Ordering::SeqCst);
+            DROP_COUNTS[usize::from(self.marker[0])].fetch_add(1, Ordering::SeqCst);
         }
     }
 
     #[test]
     fn dynamicvec_inline_drops_allocator() {
-        DROP_COUNT.store(0, Ordering::SeqCst);
         {
             // Construct an Inline DynamicVec with a non-ZST allocator.
             // `new_in` is the safe InlineVec constructor (sets the inline
             // tag bit correctly); `from_inline` wraps it in the union.
-            let inline = InlineVec::<LIMIT, CountingAlloc>::new_in(CountingAlloc {
-                _marker: [0u8; 8],
-            });
+            let inline = InlineVec::<LIMIT, CountingAlloc>::new_in(CountingAlloc::new(0));
             let _dv = DynamicVec::from_inline(inline);
         }
         assert_eq!(
-            DROP_COUNT.load(Ordering::SeqCst),
+            CountingAlloc::drops(0),
             1,
             "non-ZST allocator must be dropped when DynamicVec (Inline) drops"
         );
@@ -182,7 +184,6 @@ mod tests {
 
     #[test]
     fn dynamicvec_referenced_drops_allocator() {
-        DROP_COUNT.store(0, Ordering::SeqCst);
         {
             // Construct a Referenced DynamicVec with a non-ZST allocator.
             // `from_referenced(slice, alloc)` handles tag encoding internally.
@@ -191,20 +192,34 @@ mod tests {
             let data = b"hello";
             let _dv = DynamicVec::<LIMIT, CountingAlloc>::from_referenced(
                 data,
-                CountingAlloc { _marker: [0u8; 8] },
+                CountingAlloc::new(1),
             );
         }
         assert_eq!(
-            DROP_COUNT.load(Ordering::SeqCst),
+            CountingAlloc::drops(1),
             1,
             "non-ZST allocator must be dropped when DynamicVec (Referenced) drops"
         );
     }
 
-    // Note: a `dynamicvec_spilled_drops_allocator_once_not_twice` test would
-    // require constructing an `EcoVec<u8, CountingAlloc>` via the internal
-    // API, which is non-trivial without the allocator-api feature gate. The
-    // two tests above cover the new code path; the Spilled branch already
-    // delegates to `EcoVec`'s field-drop glue, so it is exercised by the
-    // existing `EcoString`/`EcoVec` test suites that use the Spilled path.
+    #[test]
+    fn dynamicvec_spilled_drops_allocator_once_not_twice() {
+        {
+            // Construct a Spilled DynamicVec around an `EcoVec<u8, _>` that
+            // owns a non-ZST allocator. The Spilled branch of
+            // `DynamicVec::drop` must leave the allocator to `EcoVec`'s
+            // field-drop glue instead of dropping it a second time.
+            let bytes = [7u8; LIMIT + 1];
+            let mut eco = EcoVec::with_capacity_in(bytes.len(), CountingAlloc::new(2));
+            eco.extend_from_byte_slice(&bytes);
+            let dv = DynamicVec::<LIMIT, CountingAlloc>::from_eco(eco);
+            assert!(!dv.is_inline());
+            assert_eq!(dv.as_slice(), &bytes);
+        }
+        assert_eq!(
+            CountingAlloc::drops(2),
+            1,
+            "non-ZST allocator must be dropped exactly once when DynamicVec (Spilled) drops"
+        );
+    }
 }

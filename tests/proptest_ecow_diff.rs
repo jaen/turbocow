@@ -60,8 +60,8 @@ fn check_ecovec_vs_ecow(ops: &[VecOp]) {
                 ec.reserve(n % 128);
             }
             VecOp::RetainEven => {
-                tc.retain(|x: &mut u32| *x % 2 == 0);
-                ec.retain(|x: &mut u32| *x % 2 == 0);
+                tc.retain(|x: &mut u32| x.is_multiple_of(2));
+                ec.retain(|x: &mut u32| x.is_multiple_of(2));
             }
             VecOp::RetainNone => {
                 tc.retain(|_: &mut u32| false);

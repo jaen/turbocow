@@ -6,6 +6,99 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 turbocow does not follow Semantic Versioning: minor versions may introduce
 breaking changes.
 
+## [Unreleased]
+
+Custom allocators now use the standard `core::alloc::Allocator` trait, stable
+since Rust 1.100. This replaces turbocow's own allocator abstraction and its
+three feature-gated backends.
+
+### Changed (breaking) — stable allocator API
+
+- **MSRV is now Rust 1.100** (previously 1.85), the first release with a stable
+  `core::alloc::Allocator`. Until 1.100.0 is released (scheduled for
+  2026-11-12) only the beta and nightly toolchains can build turbocow.
+- **Custom allocators need no feature flag.** `EcoVec<T, A = Global>` is
+  generic over any `core::alloc::Allocator` in every build (the default build
+  used to expose only `EcoVec<T>`): `new_in`, `with_capacity_in`,
+  `from_elem_in`, `from_slice_in`, `from_elem_copy_in`, `from_copy_slice_in`,
+  `allocator()` and `eco_vec![in alloc; ..]` are always available, e.g. with
+  `std::alloc::System` or `&bump_scope::Bump` (bump-scope 3.0+, not yet
+  released). Mutating methods need `A: Clone`, as before.
+- **Path calls of the generic `Deserialize` impl may need the element type.**
+  `EcoVec<T, A>: Deserialize` is implemented for any `A: Allocator + Default +
+  Clone` and the allocator parameter is now public in the default build, so a
+  call that names no type arguments, such as `EcoVec::deserialize(d)`, can no
+  longer infer `A` (`E0283`). Write `EcoVec::<T>::deserialize(d)` or annotate
+  the binding (`let v: EcoVec<T> = ..`). Calls that name the target type, like
+  `serde_json::from_str::<EcoVec<T>>(..)`, are unaffected.
+- **`turbocow::Global` is `alloc::alloc::Global`** (the same type as
+  `std::alloc::Global`) and is always exported. The default build used not to
+  export it; the allocator features exported `allocator_api2`'s `Global`
+  (`allocator-api2-v02` / `-v03`) or std's (`nightly-allocator-api`).
+  `vec::Drain`, `vec::Splice` and `vec::IntoIter` default to it.
+- **`EcoVec<T, A>: Clone` now requires an allocator whose clones are
+  interchangeable**, because a clone shares the buffer and the last owner frees
+  it with its own copy of the allocator. Stable Rust only guarantees that for
+  some allocators (a general `A: AllocatorClone` bound is still unstable), so
+  `Clone` is implemented for `Global`, `std::alloc::System` (with the `std`
+  feature), and `&B`, `Rc<B>` and `Arc<B>` for any `B: Allocator`. Under the
+  allocator features it was implemented for any `A: Clone`. To share a vector
+  backed by another allocator, including a `Copy` allocator handle, pass the
+  allocator by reference (`&alloc`). Code that is generic over the allocator
+  and clones an `EcoVec<T, A>` needs a `where EcoVec<T, A>: Clone` bound
+  instead of `A: Clone`; a `#[derive(Clone)]` on a struct generic over `A`
+  adds only `A: Clone`, so such a struct needs a hand-written `Clone` impl
+  with that bound. `EcoVec<T>` (the `Global` default) is unaffected.
+- **Running out of memory with a custom allocator now calls
+  `alloc::alloc::handle_alloc_error`**, like `Vec` (it aborts by default under
+  `std`). The allocator features used to panic with `allocation error: ..`
+  instead. The default build is unchanged.
+- **Removed the `allocator-api2-v02`, `allocator-api2-v03` and
+  `nightly-allocator-api` features**, the internal `allocator-api` /
+  `allocator-api-shim` features, the implicit `bump-scope` feature (an optional
+  dependency that only forwarded allocator features), and the `allocator-api2`
+  0.2 / 0.3 dependencies. Drop the feature from your `Cargo.toml`. An allocator
+  that only implements `allocator_api2`'s `Allocator` has to implement
+  `core::alloc::Allocator` instead. `alloc` and `std` remain; `alloc` no longer
+  enables anything.
+
+### Changed
+
+- **`turbocow::EcoVec` is now the struct itself** (`EcoVec<T, A = Global>`,
+  like `Vec<T, A = Global>`) instead of a type alias of a crate-private
+  struct. The rustdoc page now lists its methods and trait impls, and compiler
+  errors name `turbocow::EcoVec` rather than a private path. As both live only
+  in the type namespace, this is source-compatible.
+- `std::io::Write` is implemented for `EcoVec<u8, A>` with any
+  `A: Allocator + Clone`, not just `EcoVec<u8>`.
+
+### Tests
+
+- The custom-allocator tests (`tests/allocator_*.rs`,
+  `examples/allocator_example.rs`) now run in every `cargo test` and Miri run
+  instead of only under `--features allocator-api2-v02`, against bump-scope
+  3.0.0-dev (a git dev-dependency until 3.0.0 is released).
+- New tests use a tracking allocator to check that every block is freed exactly
+  once, with its allocation layout, across clone-on-write, `grow`, `drain`,
+  `splice` and last-owner-frees-via-a-clone paths (`Arc`/`Rc` allocators,
+  across threads). They also pin which allocators make `EcoVec` `Clone`, and
+  cover the `DynamicVec` Spilled variant dropping a non-ZST allocator exactly
+  once.
+
+### Internal
+
+- Removed the internal `AllocatorProvider` trait, its `AllocError`, the custom
+  `Global`, the three `allocator-api2` / nightly backends with their
+  `compile_error!` exclusivity checks, and the duplicated `EcoVec` alias and
+  `eco_vec!` macro for builds without an allocator feature.
+- `cfg(loom)` and `cfg(hotpath)` are declared through Cargo's `check-cfg`
+  instead of allowing `unexpected_cfgs` crate-wide.
+- Removed the unused allocator-generic `InlineVec::from_slice_in` and the
+  crate-private duplicate of `EcoVec::allocator()`.
+- CI runs on beta wherever it ran on stable or the MSRV until 1.100.0 is
+  released; the allocator mutual-exclusivity and `nightly-allocator-api` jobs
+  are gone. The stale allocator benchmark scripts were removed.
+
 ## [0.3.1-beta.1] - Unreleased
 
 turbocow is now a strict superset of ecow **0.3.1** (previously 0.3.0), and

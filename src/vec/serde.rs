@@ -1,13 +1,13 @@
+use core::alloc::Allocator;
 use core::fmt;
 use core::marker::PhantomData;
 
-use crate::allocator::AllocatorProvider;
 use crate::vec::types::EcoVec;
 
 impl<T, A> serde::Serialize for EcoVec<T, A>
 where
     T: serde::Serialize,
-    A: AllocatorProvider,
+    A: Allocator,
 {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
@@ -22,7 +22,7 @@ struct EcoVecVisitor<T, A>(PhantomData<(T, A)>);
 impl<'de, T, A> serde::de::Visitor<'de> for EcoVecVisitor<T, A>
 where
     T: serde::Deserialize<'de> + Clone,
-    A: AllocatorProvider + Default + Clone,
+    A: Allocator + Default + Clone,
 {
     type Value = EcoVec<T, A>;
 
@@ -46,7 +46,7 @@ where
 impl<'de, T, A> serde::Deserialize<'de> for EcoVec<T, A>
 where
     T: serde::Deserialize<'de> + Clone,
-    A: AllocatorProvider + Default + Clone,
+    A: Allocator + Default + Clone,
 {
     /// # Allocator requirement
     ///

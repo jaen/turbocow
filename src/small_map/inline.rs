@@ -93,8 +93,8 @@ where
         K: core::borrow::Borrow<Q>,
         Q: Eq + ?Sized,
     {
-        for i in 0..self.len {
-            let (k, v) = unsafe { self.entries[i].assume_init_ref() };
+        for entry in &self.entries[..self.len] {
+            let (k, v) = unsafe { entry.assume_init_ref() };
             if key == k.borrow() {
                 return Some(v);
             }
@@ -127,8 +127,8 @@ where
         K: core::borrow::Borrow<Q>,
         Q: Eq + ?Sized,
     {
-        for i in 0..self.len {
-            let (k, v) = unsafe { self.entries[i].assume_init_ref() };
+        for entry in &self.entries[..self.len] {
+            let (k, v) = unsafe { entry.assume_init_ref() };
             if key == k.borrow() {
                 return Some((k, v));
             }

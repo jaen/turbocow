@@ -28,3 +28,11 @@ fn flush_is_noop() {
     std::io::Write::flush(&mut v).unwrap();
     assert!(v.is_empty());
 }
+
+#[test]
+fn write_with_custom_allocator() {
+    let mut v = turbocow::EcoVec::new_in(std::alloc::System);
+    std::io::Write::write_all(&mut v, b"foo").unwrap();
+    std::io::Write::write_all(&mut v, b"bar").unwrap();
+    assert_eq!(v.as_slice(), b"foobar");
+}

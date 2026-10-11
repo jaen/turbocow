@@ -1,7 +1,7 @@
+use core::alloc::Layout;
 use core::marker::PhantomData;
 use core::mem::{self, ManuallyDrop, MaybeUninit};
 
-use crate::allocator::alloc::Layout;
 use crate::utils::max;
 
 // ── Tag constants ───────────────────────────────────────────────────────

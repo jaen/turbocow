@@ -1,4 +1,5 @@
-use crate::allocator::AllocatorProvider;
+use core::alloc::Allocator;
+
 use crate::dynamic::common::limit::LEN_VALUE_MASK_USIZE;
 use crate::dynamic::types::{DynamicVec, Variant, VariantMut};
 use crate::vec::types::EcoVec;
@@ -18,7 +19,7 @@ fn capacity_overflow() -> ! {
 
 impl<'a, const N: usize, A> DynamicVec<'a, N, A>
 where
-    A: AllocatorProvider,
+    A: Allocator,
 {
     #[inline]
     pub fn len(&self) -> usize {
@@ -332,7 +333,6 @@ where
     }
 
     #[inline]
-    #[allow(dead_code)]
     pub(crate) fn get_allocator(&self) -> &A
     where
         A: Clone,
@@ -344,7 +344,7 @@ where
             match self.variant() {
                 Variant::Referenced(r) => &r.allocator,
                 Variant::Inline(inline) => inline.get_allocator(),
-                Variant::Spilled(spilled) => spilled.get_allocator(),
+                Variant::Spilled(spilled) => spilled.allocator(),
             }
         }
     }

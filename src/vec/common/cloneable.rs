@@ -1,12 +1,12 @@
-//! Allocator-aware implementation of EcoVec
-//!
-//! This module contains the implementation of EcoVec when allocator features are enabled.
-//! It's kept in a separate file to maintain clarity and avoid excessive conditional compilation.
+//! Mutating (clone-on-write) methods and the [`Clone`] impls of [`EcoVec`].
 
+use alloc::rc::Rc;
+use alloc::sync::Arc;
+use core::alloc::Allocator;
 use core::ptr::NonNull;
 use core::{marker::PhantomData, ptr, sync::atomic::Ordering};
 
-use crate::allocator::AllocatorProvider;
+use crate::Global;
 use crate::vec::drain::Drain;
 use crate::vec::types::EcoVec;
 
@@ -15,7 +15,7 @@ use super::{capacity_overflow, out_of_bounds, ref_count_overflow};
 impl<T, A> EcoVec<T, A>
 where
     T: Clone,
-    A: AllocatorProvider + Clone,
+    A: Allocator + Clone,
 {
     /// Produce a mutable slice containing the entire vector.
     ///
@@ -487,15 +487,23 @@ where
     }
 }
 
-// Clone for allocator-aware EcoVec
-impl<T: Clone, A> Clone for EcoVec<T, A>
+impl<T, A> EcoVec<T, A>
 where
-    T: Clone,
-    A: AllocatorProvider + Clone,
+    A: Allocator + Clone,
 {
+    /// Shares the backing allocation with a new vector (the body of `Clone`).
+    ///
+    /// # Safety
+    /// Whichever vector sharing the allocation is dropped last deallocates it
+    /// with its own allocator, so clones of `A` must be equivalent to each
+    /// other in the sense of [`Allocator`]: memory allocated by one can be
+    /// deallocated by any other, and dropping one does not invalidate memory
+    /// while the others are alive. The unstable `AllocatorClone` trait promises
+    /// this; until it is stable, only call this for allocators whose clones the
+    /// standard library documents as equivalent.
     #[inline]
     #[track_caller]
-    fn clone(&self) -> Self {
+    unsafe fn clone_shared(&self) -> Self {
         // If the vector has a backing allocation, bump the ref-count.
         if let Some(header) = self.header() {
             // See Arc's clone impl for details about memory ordering.
@@ -513,5 +521,72 @@ where
             alloc: self.alloc.clone(),
             phantom: PhantomData,
         }
+    }
+}
+
+// `Clone` shares the backing allocation (see `clone_shared`), so it is only
+// implemented for allocators whose clones std documents as equivalent: all
+// `Global` and all `System` instances, a reference and the allocator behind
+// it, and an `Rc`/`Arc` and the allocator inside. (Box is left out: cloning a
+// `Box<B>` clones `B`.) These are the types std implements the unstable
+// `AllocatorClone` for; once that trait is stable these impls can become a
+// single `A: AllocatorClone` impl, a strict superset.
+
+impl<T: Clone> Clone for EcoVec<T, Global> {
+    #[inline]
+    #[track_caller]
+    fn clone(&self) -> Self {
+        // Safety: all `Global` instances are equivalent.
+        unsafe { self.clone_shared() }
+    }
+}
+
+#[cfg(feature = "std")]
+impl<T: Clone> Clone for EcoVec<T, std::alloc::System> {
+    #[inline]
+    #[track_caller]
+    fn clone(&self) -> Self {
+        // Safety: all `System` instances are equivalent.
+        unsafe { self.clone_shared() }
+    }
+}
+
+impl<T: Clone, B> Clone for EcoVec<T, &B>
+where
+    B: Allocator + ?Sized,
+{
+    #[inline]
+    #[track_caller]
+    fn clone(&self) -> Self {
+        // Safety: a reference is equivalent to the allocator it points to, so
+        // all copies of it are equivalent to each other. The borrow outlives
+        // every vector that holds a copy.
+        unsafe { self.clone_shared() }
+    }
+}
+
+impl<T: Clone, B> Clone for EcoVec<T, Rc<B>>
+where
+    B: Allocator + ?Sized,
+{
+    #[inline]
+    #[track_caller]
+    fn clone(&self) -> Self {
+        // Safety: an `Rc` is equivalent to the allocator inside, which lives as
+        // long as any clone of the `Rc`.
+        unsafe { self.clone_shared() }
+    }
+}
+
+impl<T: Clone, B> Clone for EcoVec<T, Arc<B>>
+where
+    B: Allocator + ?Sized,
+{
+    #[inline]
+    #[track_caller]
+    fn clone(&self) -> Self {
+        // Safety: an `Arc` is equivalent to the allocator inside, which lives
+        // as long as any clone of the `Arc`.
+        unsafe { self.clone_shared() }
     }
 }

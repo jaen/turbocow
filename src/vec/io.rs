@@ -1,12 +1,11 @@
-use crate::allocator::Global;
+use core::alloc::Allocator;
+
 use crate::vec::types::EcoVec;
 
-/// # Allocator limitation
-///
-/// This impl is only available for `EcoVec<u8, Global>`. For an
-/// allocator-parameterized `EcoVec<u8, A>`, write to a `Vec<u8>` first
-/// and then convert via `EcoVec::from(vec)`.
-impl std::io::Write for EcoVec<u8, Global> {
+impl<A> std::io::Write for EcoVec<u8, A>
+where
+    A: Allocator + Clone,
+{
     #[inline]
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
         self.extend_from_byte_slice(buf);

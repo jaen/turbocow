@@ -326,11 +326,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1781407245,
-        "narHash": "sha256-VzJq4MmD0uyNDAceudSe1hHqcQMe9Tau0U4S+5iRGh0=",
-        "rev": "d5f483210eb016d66102eef22baa128b3b3233fc",
+        "lastModified": 1791707771,
+        "narHash": "sha256-w3m8HtAVCfGTHw+gcCTAy7jFHSdGbokm8NngbeFrkek=",
+        "rev": "c1cfa7a2c809d364ac1a7e9b3ec418afa3f19793",
         "type": "tarball",
-        "url": "https://git.jaen.me/api/v1/repos/mirrors/rust-overlay/archive/d5f483210eb016d66102eef22baa128b3b3233fc.tar.gz"
+        "url": "https://git.jaen.me/api/v1/repos/mirrors/rust-overlay/archive/c1cfa7a2c809d364ac1a7e9b3ec418afa3f19793.tar.gz"
       },
       "original": {
         "type": "tarball",
